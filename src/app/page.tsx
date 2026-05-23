@@ -53,7 +53,11 @@ export default function Home() {
       const p = providers.find((p) => p.id === active.provider);
       setSelectedModel(active.model || p?.defaultModel || "");
       setProjectInput(active.project || "");
-      // GitHub context is restored by GitHubSidebar via savedContext prop
+      // Restore GitHub context so push button works even when sidebar is closed
+      if (active.githubContext) {
+        setActiveRepo(active.githubContext.repo);
+        setInjectedFiles(active.githubContext.files);
+      }
     } else {
       setMessages([]);
       setRoutingBadges({});
