@@ -15,16 +15,12 @@ function ghHeaders() {
   };
 }
 
-// Extracted as a top-level async arrow to avoid "function inside block" TS error
 const readDirRecursive = async (
   repo: string,
   dirPath: string,
   results: { path: string; content: string }[]
 ): Promise<void> => {
-  const res = await fetch(
-    `${GH_BASE}/repos/${repo}/contents/${dirPath}`,
-    { headers: ghHeaders() }
-  );
+  const res = await fetch(`${GH_BASE}/repos/${repo}/contents/${dirPath}`, { headers: ghHeaders() });
   if (!res.ok) return;
   const items = await res.json();
   if (!Array.isArray(items)) return;
@@ -37,19 +33,14 @@ const readDirRecursive = async (
       } else if (item.type === "file") {
         const ext = "." + item.name.split(".").pop()?.toLowerCase();
         if (SKIP_EXTS.has(ext)) return;
-        const fileRes = await fetch(
-          `${GH_BASE}/repos/${repo}/contents/${item.path}`,
-          { headers: ghHeaders() }
-        );
+        const fileRes = await fetch(`${GH_BASE}/repos/${repo}/contents/${item.path}`, { headers: ghHeaders() });
         if (!fileRes.ok) return;
         const fileData = await fileRes.json();
         if (!fileData.content) return;
         try {
           const content = Buffer.from(fileData.content, "base64").toString("utf-8");
           results.push({ path: item.path, content });
-        } catch {
-          // Binary file — skip
-        }
+        } catch { /* binary file — skip */ }
       }
     })
   );
@@ -61,21 +52,13 @@ export async function GET(req: NextRequest) {
 
   try {
     if (action === "repos") {
-      const res = await fetch(
-        `${GH_BASE}/user/repos?sort=pushed&per_page=50&type=all`,
-        { headers: ghHeaders() }
-      );
+      const res = await fetch(`${GH_BASE}/user/repos?sort=pushed&per_page=50&type=all`, { headers: ghHeaders() });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      return NextResponse.json(
-        data.map((r: Record<string, unknown>) => ({
-          name: r.name,
-          full_name: r.full_name,
-          description: r.description,
-          private: r.private,
-          default_branch: r.default_branch,
-        }))
-      );
+      return NextResponse.json(data.map((r: Record<string, unknown>) => ({
+        name: r.name, full_name: r.full_name, description: r.description,
+        private: r.private, default_branch: r.default_branch,
+      })));
     }
 
     if (action === "tree") {
