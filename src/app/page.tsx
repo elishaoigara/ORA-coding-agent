@@ -5,7 +5,7 @@ import GitHubSidebar from "@/components/GitHubSidebar";
 import ChatMessage from "@/components/ChatMessage";
 import ConversationList from "@/components/ConversationList";
 import { useConversations } from "@/hooks/useConversations";
-import type { Message, InjectedFile, PublicProvider } from "@/types";
+import type { Message, InjectedFile, PublicProvider, GitHubContext } from "@/types";
 
 const QUICK_PROMPTS = [
   "Write a Python function to parse JSON safely with error handling",
@@ -14,11 +14,7 @@ const QUICK_PROMPTS = [
   "Write unit tests for the function above",
 ];
 
-interface RoutingBadge {
-  provider: string;
-  model: string;
-  reason: string;
-}
+interface RoutingBadge { provider: string; model: string; reason: string; }
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -26,12 +22,12 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [injectedFiles, setInjectedFiles] = useState<InjectedFile[]>([]);
+  const [activeRepo, setActiveRepo] = useState("");
   const [providers, setProviders] = useState<PublicProvider[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState("auto");
   const [selectedModel, setSelectedModel] = useState("");
-  const [password, setPassword] = useState("local");
-  const [authed, setAuthed] = useState(true);
-  const [authError, setAuthError] = useState("");
+  const [password] = useState("local");
+  const [authed] = useState(true);
   const [showHistory, setShowHistory] = useState(true);
   const [showGitHub, setShowGitHub] = useState(false);
   const [projectInput, setProjectInput] = useState("");
@@ -39,23 +35,16 @@ export default function Home() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const {
-    conversations,
-    active,
-    activeId,
-    newConversation,
-    saveConversation,
-    loadConversation,
-    deleteConversation,
-    setProject,
+    conversations, active, activeId,
+    newConversation, saveConversation, saveGitHubContext,
+    loadConversation, deleteConversation, setProject,
   } = useConversations();
 
   useEffect(() => {
-    fetch("/api/provider")
-      .then((r) => r.json())
-      .then((data: PublicProvider[]) => setProviders(data));
+    fetch("/api/provider").then((r) => r.json()).then((data: PublicProvider[]) => setProviders(data));
   }, []);
 
-  // When a conversation is loaded, restore its messages + provider
+  // Restore conversation state (messages, provider, GitHub context) when switching
   useEffect(() => {
     if (active) {
       setMessages(active.messages);
@@ -64,9 +53,13 @@ export default function Home() {
       const p = providers.find((p) => p.id === active.provider);
       setSelectedModel(active.model || p?.defaultModel || "");
       setProjectInput(active.project || "");
+      // GitHub context is restored by GitHubSidebar via savedContext prop
     } else {
       setMessages([]);
       setRoutingBadges({});
+      setProjectInput("");
+      setInjectedFiles([]);
+      setActiveRepo("");
     }
   }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -84,12 +77,14 @@ export default function Home() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  function checkPassword() {
-    if (!password.trim()) { setAuthError("Enter the app password"); return; }
-    fetch("/api/provider", { headers: { "x-app-password": password } }).then((r) => {
-      if (r.ok) { setAuthed(true); setAuthError(""); }
-      else setAuthError("Wrong password");
-    });
+  // Called by GitHubSidebar whenever files change
+  function handleFilesChange(files: InjectedFile[], repo: string) {
+    setInjectedFiles(files);
+    setActiveRepo(repo);
+    // Persist GitHub context to current conversation if one is open
+    if (activeId && repo) {
+      saveGitHubContext(repo, files);
+    }
   }
 
   async function sendMessage(text?: string) {
@@ -107,12 +102,7 @@ export default function Home() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-app-password": password },
-        body: JSON.stringify({
-          messages: newMessages,
-          model: selectedModel,
-          provider: selectedProviderId,
-          injectedFiles,
-        }),
+        body: JSON.stringify({ messages: newMessages, model: selectedModel, provider: selectedProviderId, injectedFiles }),
       });
 
       if (!res.ok) {
@@ -126,10 +116,7 @@ export default function Home() {
         const routedModel = res.headers.get("X-Routed-Model") ?? "";
         const routeReason = res.headers.get("X-Route-Reason") ?? "";
         if (routedProvider) {
-          setRoutingBadges((b) => ({
-            ...b,
-            [assistantIndex]: { provider: routedProvider, model: routedModel, reason: routeReason },
-          }));
+          setRoutingBadges((b) => ({ ...b, [assistantIndex]: { provider: routedProvider, model: routedModel, reason: routeReason } }));
         }
       }
 
@@ -154,12 +141,11 @@ export default function Home() {
         }
       }
 
-      // Auto-save after response completes
-      const finalMessages: Message[] = [
-        ...newMessages,
-        { role: "assistant", content: fullText },
-      ];
-      saveConversation(finalMessages, selectedProviderId, selectedModel, active?.project ?? projectInput);
+      const finalMessages: Message[] = [...newMessages, { role: "assistant", content: fullText }];
+      const ghCtx: GitHubContext | undefined = activeRepo && injectedFiles.length
+        ? { repo: activeRepo, files: injectedFiles, pinnedAt: Date.now() }
+        : undefined;
+      saveConversation(finalMessages, selectedProviderId, selectedModel, active?.project ?? projectInput, ghCtx);
 
     } catch (e) {
       setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `Network error: ${(e as Error).message}` }]);
@@ -172,58 +158,25 @@ export default function Home() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   }
 
-  function handleNewChat() {
-    newConversation();
-    setMessages([]);
-    setRoutingBadges({});
-    setProjectInput("");
-  }
+  function handleNewChat() { newConversation(); setMessages([]); setRoutingBadges({}); setProjectInput(""); setInjectedFiles([]); setActiveRepo(""); }
 
-  function handleProjectSave() {
-    setProject(projectInput);
-    setEditingProject(false);
-  }
+  function handleProjectSave() { setProject(projectInput); setEditingProject(false); }
 
-  if (!authed) {
-    return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-8 w-80 flex flex-col gap-4">
-          <div className="text-center">
-            <div className="text-teal-400 text-2xl mb-1">⌘</div>
-            <h1 className="text-zinc-100 font-semibold">AI Coding Agent</h1>
-            <p className="text-zinc-500 text-sm mt-1">Enter your app password</p>
-          </div>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && checkPassword()} placeholder="Password"
-            className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 text-sm focus:outline-none focus:border-teal-600" autoFocus />
-          {authError && <p className="text-red-400 text-xs text-center">{authError}</p>}
-          <button onClick={checkPassword} className="bg-teal-700 hover:bg-teal-600 text-white rounded-lg py-2 text-sm font-medium transition-colors">Sign in</button>
-        </div>
-      </div>
-    );
-  }
+  if (!authed) return null;
 
   return (
     <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden">
-      {/* Top bar */}
       <header className="border-b border-zinc-800 px-4 py-2.5 flex items-center gap-3 flex-shrink-0 bg-zinc-950">
-        <button onClick={() => setShowHistory((s) => !s)} className="text-zinc-500 hover:text-zinc-200 text-xs" title="Chat history">
-          🕐
-        </button>
+        <button onClick={() => setShowHistory((s) => !s)} className="text-zinc-500 hover:text-zinc-200 text-xs" title="Chat history">🕐</button>
         <span className="text-teal-400 font-mono font-bold tracking-tight">code<span className="text-zinc-400">agent</span></span>
 
-        {/* Project tag */}
         <div className="flex items-center gap-1">
           {editingProject ? (
-            <input
-              value={projectInput}
-              onChange={(e) => setProjectInput(e.target.value)}
+            <input value={projectInput} onChange={(e) => setProjectInput(e.target.value)}
               onBlur={handleProjectSave}
               onKeyDown={(e) => { if (e.key === "Enter") handleProjectSave(); if (e.key === "Escape") setEditingProject(false); }}
               placeholder="Project name…"
-              className="bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-zinc-300 text-xs w-32 focus:outline-none focus:border-teal-600"
-              autoFocus
-            />
+              className="bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-zinc-300 text-xs w-32 focus:outline-none focus:border-teal-600" autoFocus />
           ) : (
             <button onClick={() => setEditingProject(true)} className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 hover:border-zinc-600 rounded px-2 py-0.5 transition-colors">
               {active?.project || projectInput || "＋ project"}
@@ -231,69 +184,55 @@ export default function Home() {
           )}
         </div>
 
-        {/* Provider selector */}
         <div className="flex items-center gap-2 ml-1">
           <select value={selectedProviderId} onChange={(e) => handleProviderChange(e.target.value)}
             className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600">
             <option value="auto">⚡ Auto</option>
             <option disabled>──────────</option>
             {providers.map((p) => (
-              <option key={p.id} value={p.id} disabled={!p.configured}>
-                {p.name}{!p.configured ? " (no key)" : ""}
-              </option>
+              <option key={p.id} value={p.id} disabled={!p.configured}>{p.name}{!p.configured ? " (no key)" : ""}</option>
             ))}
           </select>
-          {!isAuto && (
+          {!isAuto && activeProvider && (
             <>
               <span className="text-zinc-700 text-xs">/</span>
               <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}
                 className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600">
-                {activeProvider?.models.map((m) => (
-                  <option key={m.id} value={m.id}>{m.label}</option>
-                ))}
+                {activeProvider.models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>
             </>
           )}
-          {isAuto && (
-            <span className="text-xs text-amber-400 bg-amber-950 border border-amber-800 rounded-full px-2 py-0.5">
-              picks best model per message
-            </span>
-          )}
+          {isAuto && <span className="text-xs text-amber-400 bg-amber-950 border border-amber-800 rounded-full px-2 py-0.5">picks best model</span>}
         </div>
 
         <div className="ml-auto flex items-center gap-3">
           {injectedFiles.length > 0 && (
             <span className="text-xs text-teal-500 bg-teal-950 border border-teal-800 rounded-full px-2 py-0.5">
-              {injectedFiles.length} file{injectedFiles.length > 1 ? "s" : ""} in context
+              📌 {injectedFiles.length} file{injectedFiles.length > 1 ? "s" : ""} in context
             </span>
           )}
-          <button onClick={() => setShowGitHub((s) => !s)} className={`text-xs transition-colors ${showGitHub ? "text-teal-400" : "text-zinc-500 hover:text-zinc-300"}`} title="GitHub files">
+          <button onClick={() => setShowGitHub((s) => !s)}
+            className={`text-xs transition-colors ${showGitHub ? "text-teal-400" : "text-zinc-500 hover:text-zinc-300"}`}>
             GitHub
           </button>
         </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* History sidebar */}
         {showHistory && (
           <div className="w-60 border-r border-zinc-800 flex flex-col bg-zinc-950 flex-shrink-0">
-            <div className="px-3 py-2 border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
-              History
-            </div>
-            <ConversationList
-              conversations={conversations}
-              activeId={activeId}
-              onSelect={loadConversation}
-              onNew={handleNewChat}
-              onDelete={deleteConversation}
-            />
+            <div className="px-3 py-2 border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">History</div>
+            <ConversationList conversations={conversations} activeId={activeId} onSelect={loadConversation} onNew={handleNewChat} onDelete={deleteConversation} />
           </div>
         )}
 
-        {/* GitHub sidebar */}
-        {showGitHub && <GitHubSidebar onFilesChange={setInjectedFiles} />}
+        {showGitHub && (
+          <GitHubSidebar
+            onFilesChange={handleFilesChange}
+            savedContext={active?.githubContext}
+          />
+        )}
 
-        {/* Chat */}
         <main className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             {messages.length === 0 ? (
@@ -302,7 +241,7 @@ export default function Home() {
                   <div className="text-4xl mb-2">⌘</div>
                   <h2 className="text-zinc-200 font-semibold text-lg">Your AI coding agent</h2>
                   <p className="text-zinc-500 text-sm mt-1 max-w-sm">
-                    Chats are saved automatically. Tag them with a project to stay organised.
+                    Chats are saved automatically. Open GitHub to pin files — they stay across sessions.
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 max-w-lg w-full">
@@ -341,7 +280,7 @@ export default function Home() {
           <div className="border-t border-zinc-800 px-4 py-3 flex-shrink-0 bg-zinc-950">
             <div className="flex gap-3 items-end max-w-4xl mx-auto">
               <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
-                placeholder={isAuto ? "Ask anything — Auto will pick the best model…" : "Ask the coding agent… (Shift+Enter for newline)"}
+                placeholder={isAuto ? "Ask anything — Auto picks the best model…" : "Ask the coding agent… (Shift+Enter for newline)"}
                 rows={2} className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 text-sm resize-none focus:outline-none focus:border-teal-600 placeholder:text-zinc-600" />
               <button onClick={() => sendMessage()} disabled={loading || !input.trim()}
                 className="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl px-4 py-3 text-sm font-medium transition-colors flex-shrink-0">

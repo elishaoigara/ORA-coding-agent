@@ -1,14 +1,15 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import type { Message } from "@/types";
+import type { Message, InjectedFile, GitHubContext } from "@/types";
 
 export interface Conversation {
   id: string;
   title: string;
-  project: string;       // e.g. "ORA Agent", "Client App", ""
+  project: string;
   messages: Message[];
   provider: string;
   model: string;
+  githubContext?: GitHubContext; // ← persisted GitHub files/repo
   createdAt: number;
   updatedAt: number;
 }
@@ -36,35 +37,45 @@ export function useConversations() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  // Load from localStorage on mount
   useEffect(() => {
     setConversations(load());
   }, []);
 
   const active = conversations.find((c) => c.id === activeId) ?? null;
 
-  /** Start a brand-new empty conversation */
   const newConversation = useCallback(() => {
     setActiveId(null);
   }, []);
 
-  /** Save/update the current conversation */
   const saveConversation = useCallback(
-    (messages: Message[], provider: string, model: string, project = "") => {
+    (
+      messages: Message[],
+      provider: string,
+      model: string,
+      project = "",
+      githubContext?: GitHubContext
+    ) => {
       if (!messages.length) return;
 
       setConversations((prev) => {
         let updated: Conversation[];
 
         if (activeId) {
-          // Update existing
           updated = prev.map((c) =>
             c.id === activeId
-              ? { ...c, messages, provider, model, project, title: autoTitle(messages), updatedAt: Date.now() }
+              ? {
+                  ...c,
+                  messages,
+                  provider,
+                  model,
+                  project,
+                  githubContext: githubContext ?? c.githubContext,
+                  title: autoTitle(messages),
+                  updatedAt: Date.now(),
+                }
               : c
           );
         } else {
-          // Create new conversation and set it as active
           const newConv: Conversation = {
             id: crypto.randomUUID(),
             title: autoTitle(messages),
@@ -72,11 +83,11 @@ export function useConversations() {
             messages,
             provider,
             model,
+            githubContext,
             createdAt: Date.now(),
             updatedAt: Date.now(),
           };
           updated = [newConv, ...prev];
-          // We return id so caller can set it
           setActiveId(newConv.id);
         }
 
@@ -87,12 +98,26 @@ export function useConversations() {
     [activeId]
   );
 
-  /** Load a past conversation */
+  /** Save only the GitHub context for the current conversation */
+  const saveGitHubContext = useCallback(
+    (repo: string, files: InjectedFile[]) => {
+      if (!activeId) return;
+      const ctx: GitHubContext = { repo, files, pinnedAt: Date.now() };
+      setConversations((prev) => {
+        const updated = prev.map((c) =>
+          c.id === activeId ? { ...c, githubContext: ctx, updatedAt: Date.now() } : c
+        );
+        save(updated);
+        return updated;
+      });
+    },
+    [activeId]
+  );
+
   const loadConversation = useCallback((id: string) => {
     setActiveId(id);
   }, []);
 
-  /** Delete a conversation */
   const deleteConversation = useCallback((id: string) => {
     setConversations((prev) => {
       const updated = prev.filter((c) => c.id !== id);
@@ -102,7 +127,6 @@ export function useConversations() {
     setActiveId((cur) => (cur === id ? null : cur));
   }, []);
 
-  /** Update project tag on active conversation */
   const setProject = useCallback(
     (project: string) => {
       if (!activeId) return;
@@ -123,6 +147,7 @@ export function useConversations() {
     activeId,
     newConversation,
     saveConversation,
+    saveGitHubContext,
     loadConversation,
     deleteConversation,
     setProject,

@@ -27,15 +27,21 @@ export interface InjectedFile {
 export interface ChatRequest {
   messages: Message[];
   model: string;
-  provider: string;        // e.g. "groq" | "deepseek" | "qwen"
+  provider: string;
   injectedFiles?: InjectedFile[];
 }
 
-// Shape returned by /api/provider
 export interface PublicProvider {
   id: string;
   name: string;
   models: { id: string; label: string }[];
   defaultModel: string;
-  configured: boolean;     // false = API key not set, show as disabled in UI
+  configured: boolean;
+}
+
+// Persisted GitHub context — saved per conversation
+export interface GitHubContext {
+  repo: string;          // e.g. "elishaoigara/ORA"
+  files: InjectedFile[]; // injected files
+  pinnedAt: number;      // timestamp
 }
