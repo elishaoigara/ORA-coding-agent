@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProvider } from "@/lib/providers";
+import { getProvider, getAllPublicProviders } from "@/lib/providers";
+import { routeMessage } from "@/lib/autoRouter";
 import type { ChatRequest, InjectedFile } from "@/types";
 
 const SYSTEM_PROMPT = `You are an expert AI coding agent. You help developers write, debug, refactor, review, and understand code across all languages and frameworks.
@@ -15,16 +16,18 @@ Guidelines:
 function buildContextBlock(files: InjectedFile[]): string {
   if (!files.length) return "";
   const parts = files.map(
-    (f) =>
-      `### File: ${f.repo}/${f.path}\n\`\`\`\n${f.content}\n\`\`\``
+    (f) => `### File: ${f.repo}/${f.path}\n\`\`\`\n${f.content}\n\`\`\``
   );
   return `<context>\nThe user has shared these files from their GitHub repo:\n\n${parts.join("\n\n")}\n</context>\n\n`;
 }
 
 export async function POST(req: NextRequest) {
-  // Simple auth check — skipped if APP_PASSWORD is not set (local dev)
   const authHeader = req.headers.get("x-app-password");
-  if (process.env.APP_PASSWORD && process.env.APP_PASSWORD !== "change_me_in_production" && authHeader !== process.env.APP_PASSWORD) {
+  if (
+    process.env.APP_PASSWORD &&
+    process.env.APP_PASSWORD !== "change_me_in_production" &&
+    authHeader !== process.env.APP_PASSWORD
+  ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -35,10 +38,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { messages, model, injectedFiles = [] } = body;
-  const provider = getProvider();
+  const { messages, model, provider: providerId, injectedFiles = [] } = body;
 
-  // Prepend file context to the latest user message if files are injected
+  let resolvedProviderId = providerId;
+  let resolvedModel = model;
+  let routeReason = "";
+
+  if (providerId === "auto") {
+    const lastUserMessage = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+    const configuredProviders = getAllPublicProviders()
+      .filter((p) => p.configured)
+      .map((p) => p.id);
+
+    const decision = routeMessage(lastUserMessage, configuredProviders);
+    resolvedProviderId = decision.provider;
+    resolvedModel = decision.model;
+    routeReason = decision.reason;
+  }
+
+  let provider;
+  try {
+    provider = getProvider(resolvedProviderId);
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+  }
+
   const contextBlock = buildContextBlock(injectedFiles);
   const enrichedMessages = messages.map((m, i) => {
     if (i === messages.length - 1 && m.role === "user" && contextBlock) {
@@ -48,11 +72,8 @@ export async function POST(req: NextRequest) {
   });
 
   const payload = {
-    model: model || provider.defaultModel,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      ...enrichedMessages,
-    ],
+    model: resolvedModel || provider.defaultModel,
+    messages: [{ role: "system", content: SYSTEM_PROMPT }, ...enrichedMessages],
     stream: true,
     max_tokens: 4096,
     temperature: 0.3,
@@ -64,7 +85,6 @@ export async function POST(req: NextRequest) {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${provider.apiKey}`,
-        // Anthropic needs an extra header; harmless for others
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(payload),
@@ -73,22 +93,24 @@ export async function POST(req: NextRequest) {
     if (!upstream.ok) {
       const err = await upstream.text();
       return NextResponse.json(
-        { error: `Provider error: ${err}` },
+        { error: `Provider error (${provider.name}): ${err}` },
         { status: upstream.status }
       );
     }
 
-    // Stream the response straight to the client
     return new NextResponse(upstream.body, {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
+        "X-Routed-Provider": resolvedProviderId,
+        "X-Routed-Model": resolvedModel || provider.defaultModel,
+        "X-Route-Reason": routeReason,
       },
     });
   } catch (e) {
     return NextResponse.json(
-      { error: `Failed to reach provider: ${(e as Error).message}` },
+      { error: `Failed to reach ${provider.name}: ${(e as Error).message}` },
       { status: 502 }
     );
   }
