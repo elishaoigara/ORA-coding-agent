@@ -4,8 +4,10 @@ import { useState, useEffect, useRef } from "react";
 import GitHubSidebar from "@/components/GitHubSidebar";
 import ChatMessage from "@/components/ChatMessage";
 import ConversationList from "@/components/ConversationList";
+import StagedChanges from "@/components/StagedChanges";
 import { useConversations } from "@/hooks/useConversations";
 import type { Message, InjectedFile, PublicProvider, GitHubContext } from "@/types";
+import type { StagedFile } from "@/lib/agentTools";
 
 const QUICK_PROMPTS = [
   "Write a Python function to parse JSON safely with error handling",
@@ -14,24 +16,36 @@ const QUICK_PROMPTS = [
   "Write unit tests for the function above",
 ];
 
+const AGENT_PROMPTS = [
+  "Read the codebase structure and fix any TypeScript errors you find",
+  "Add input validation to all API routes",
+  "Refactor to use a consistent error handling pattern",
+  "Add JSDoc comments to all exported functions",
+];
+
 interface RoutingBadge { provider: string; model: string; reason: string; }
 
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages]       = useState<Message[]>([]);
   const [routingBadges, setRoutingBadges] = useState<Record<number, RoutingBadge>>({});
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [input, setInput]             = useState("");
+  const [loading, setLoading]         = useState(false);
   const [injectedFiles, setInjectedFiles] = useState<InjectedFile[]>([]);
-  const [activeRepo, setActiveRepo] = useState("");
-  const [providers, setProviders] = useState<PublicProvider[]>([]);
+  const [activeRepo, setActiveRepo]   = useState("");
+  const [providers, setProviders]     = useState<PublicProvider[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState("auto");
   const [selectedModel, setSelectedModel] = useState("");
-  const [password] = useState("local");
-  const [authed] = useState(true);
+  const [password]                    = useState("local");
   const [showHistory, setShowHistory] = useState(true);
-  const [showGitHub, setShowGitHub] = useState(false);
+  const [showGitHub, setShowGitHub]   = useState(false);
   const [projectInput, setProjectInput] = useState("");
   const [editingProject, setEditingProject] = useState(false);
+
+  // Agent mode
+  const [agentMode, setAgentMode]     = useState(false);
+  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
+  const [agentStatus, setAgentStatus] = useState("");
+
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -44,7 +58,6 @@ export default function Home() {
     fetch("/api/provider").then((r) => r.json()).then((data: PublicProvider[]) => setProviders(data));
   }, []);
 
-  // Restore conversation state (messages, provider, GitHub context) when switching
   useEffect(() => {
     if (active) {
       setMessages(active.messages);
@@ -53,7 +66,6 @@ export default function Home() {
       const p = providers.find((p) => p.id === active.provider);
       setSelectedModel(active.model || p?.defaultModel || "");
       setProjectInput(active.project || "");
-      // Restore GitHub context so push button works even when sidebar is closed
       if (active.githubContext) {
         setActiveRepo(active.githubContext.repo);
         setInjectedFiles(active.githubContext.files);
@@ -79,23 +91,16 @@ export default function Home() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [messages, loading, stagedFiles]);
 
-  // Called by GitHubSidebar whenever files change
   function handleFilesChange(files: InjectedFile[], repo: string) {
     setInjectedFiles(files);
     setActiveRepo(repo);
-    // Persist GitHub context to current conversation if one is open
-    if (activeId && repo) {
-      saveGitHubContext(repo, files);
-    }
+    if (activeId && repo) saveGitHubContext(repo, files);
   }
 
-  async function sendMessage(text?: string) {
-    const userText = (text ?? input).trim();
-    if (!userText || loading) return;
-    setInput("");
-
+  // ── Normal chat ─────────────────────────────────────────────────────────────
+  async function sendChat(userText: string) {
     const newMessages: Message[] = [...messages, { role: "user", content: userText }];
     setMessages(newMessages);
     setLoading(true);
@@ -117,16 +122,16 @@ export default function Home() {
 
       if (isAuto) {
         const routedProvider = res.headers.get("X-Routed-Provider") ?? "";
-        const routedModel = res.headers.get("X-Routed-Model") ?? "";
-        const routeReason = res.headers.get("X-Route-Reason") ?? "";
+        const routedModel    = res.headers.get("X-Routed-Model") ?? "";
+        const routeReason    = res.headers.get("X-Route-Reason") ?? "";
         if (routedProvider) {
           setRoutingBadges((b) => ({ ...b, [assistantIndex]: { provider: routedProvider, model: routedModel, reason: routeReason } }));
         }
       }
 
-      const reader = res.body!.getReader();
+      const reader  = res.body!.getReader();
       const decoder = new TextDecoder();
-      let fullText = "";
+      let fullText  = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -138,7 +143,7 @@ export default function Home() {
           if (data === "[DONE]") continue;
           try {
             const parsed = JSON.parse(data);
-            const delta = parsed.choices?.[0]?.delta?.content ?? "";
+            const delta  = parsed.choices?.[0]?.delta?.content ?? "";
             fullText += delta;
             setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: fullText }]);
           } catch { /* incomplete chunk */ }
@@ -158,22 +163,123 @@ export default function Home() {
     }
   }
 
+  // ── Agent task ──────────────────────────────────────────────────────────────
+  async function sendAgentTask(userText: string) {
+    if (!activeRepo) {
+      setMessages((m) => [...m,
+        { role: "user", content: userText },
+        { role: "assistant", content: "⚠️ Open the GitHub sidebar and select a repo first — the agent needs a repo to read and modify files." },
+      ]);
+      return;
+    }
+
+    const newMessages: Message[] = [...messages, { role: "user", content: userText }];
+    setMessages(newMessages);
+    setLoading(true);
+    setStagedFiles([]);
+    setAgentStatus("Starting…");
+    setMessages((m) => [...m, { role: "assistant", content: "" }]);
+
+    let agentText = "";
+
+    try {
+      const res = await fetch("/api/agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          task: userText,
+          repo: activeRepo,
+          provider: isAuto ? "qwen" : selectedProviderId, // prefer qwen for agent (best tool calling)
+          model:    isAuto ? "qwen3-coder-plus" : (selectedModel === "deepseek-reasoner" ? "deepseek-chat" : selectedModel),
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `❌ Agent error: ${err.error}` }]);
+        return;
+      }
+
+      const reader  = res.body!.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n").filter((l) => l.startsWith("data: "));
+
+        for (const line of lines) {
+          try {
+            const event = JSON.parse(line.slice(6));
+
+            if (event.type === "progress" || event.type === "tool_call") {
+              setAgentStatus(event.text);
+            }
+
+            if (event.type === "text") {
+              agentText += event.text;
+              setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: agentText }]);
+            }
+
+            if (event.type === "staged") {
+              setStagedFiles(event.files);
+            }
+
+            if (event.type === "done") {
+              setAgentStatus("");
+            }
+
+          } catch { /* incomplete JSON */ }
+        }
+      }
+
+      const finalMessages: Message[] = [...newMessages, { role: "assistant", content: agentText }];
+      saveConversation(finalMessages, selectedProviderId, selectedModel, active?.project ?? projectInput);
+
+    } catch (e) {
+      setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `Network error: ${(e as Error).message}` }]);
+    } finally {
+      setLoading(false);
+      setAgentStatus("");
+    }
+  }
+
+  async function sendMessage(text?: string) {
+    const userText = (text ?? input).trim();
+    if (!userText || loading) return;
+    setInput("");
+    if (agentMode) {
+      await sendAgentTask(userText);
+    } else {
+      await sendChat(userText);
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   }
 
-  function handleNewChat() { newConversation(); setMessages([]); setRoutingBadges({}); setProjectInput(""); setInjectedFiles([]); setActiveRepo(""); }
+  function handleNewChat() {
+    newConversation();
+    setMessages([]);
+    setRoutingBadges({});
+    setProjectInput("");
+    setInjectedFiles([]);
+    setActiveRepo("");
+    setStagedFiles([]);
+  }
 
   function handleProjectSave() { setProject(projectInput); setEditingProject(false); }
 
-  if (!authed) return null;
-
   return (
     <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden">
+      {/* Header */}
       <header className="border-b border-zinc-800 px-4 py-2.5 flex items-center gap-3 flex-shrink-0 bg-zinc-950">
-        <button onClick={() => setShowHistory((s) => !s)} className="text-zinc-500 hover:text-zinc-200 text-xs" title="Chat history">🕐</button>
+        <button onClick={() => setShowHistory((s) => !s)} className="text-zinc-500 hover:text-zinc-200 text-xs" title="History">🕐</button>
         <span className="text-teal-400 font-mono font-bold tracking-tight">code<span className="text-zinc-400">agent</span></span>
 
+        {/* Project tag */}
         <div className="flex items-center gap-1">
           {editingProject ? (
             <input value={projectInput} onChange={(e) => setProjectInput(e.target.value)}
@@ -188,7 +294,24 @@ export default function Home() {
           )}
         </div>
 
-        <div className="flex items-center gap-2 ml-1">
+        {/* Mode toggle */}
+        <div className="flex items-center bg-zinc-800 border border-zinc-700 rounded-lg p-0.5 gap-0.5">
+          <button
+            onClick={() => setAgentMode(false)}
+            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${!agentMode ? "bg-zinc-600 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
+          >
+            Chat
+          </button>
+          <button
+            onClick={() => setAgentMode(true)}
+            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${agentMode ? "bg-teal-800 text-teal-100" : "text-zinc-500 hover:text-zinc-300"}`}
+          >
+            ⚡ Agent
+          </button>
+        </div>
+
+        {/* Provider selector */}
+        <div className="flex items-center gap-2">
           <select value={selectedProviderId} onChange={(e) => handleProviderChange(e.target.value)}
             className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600">
             <option value="auto">⚡ Auto</option>
@@ -206,13 +329,17 @@ export default function Home() {
               </select>
             </>
           )}
-          {isAuto && <span className="text-xs text-amber-400 bg-amber-950 border border-amber-800 rounded-full px-2 py-0.5">picks best model</span>}
         </div>
 
         <div className="ml-auto flex items-center gap-3">
+          {activeRepo && (
+            <span className="text-xs text-zinc-500 bg-zinc-800 border border-zinc-700 rounded-full px-2 py-0.5 font-mono truncate max-w-36">
+              {activeRepo.split("/")[1]}
+            </span>
+          )}
           {injectedFiles.length > 0 && (
             <span className="text-xs text-teal-500 bg-teal-950 border border-teal-800 rounded-full px-2 py-0.5">
-              📌 {injectedFiles.length} file{injectedFiles.length > 1 ? "s" : ""} in context
+              📌 {injectedFiles.length} file{injectedFiles.length > 1 ? "s" : ""}
             </span>
           )}
           <button onClick={() => setShowGitHub((s) => !s)}
@@ -226,30 +353,39 @@ export default function Home() {
         {showHistory && (
           <div className="w-60 border-r border-zinc-800 flex flex-col bg-zinc-950 flex-shrink-0">
             <div className="px-3 py-2 border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">History</div>
-            <ConversationList conversations={conversations} activeId={activeId} onSelect={loadConversation} onNew={handleNewChat} onDelete={deleteConversation} />
+            <ConversationList conversations={conversations} activeId={activeId}
+              onSelect={loadConversation} onNew={handleNewChat} onDelete={deleteConversation} />
           </div>
         )}
 
-        {showGitHub && (
-          <GitHubSidebar
-            onFilesChange={handleFilesChange}
-            savedContext={active?.githubContext}
-          />
-        )}
+        {showGitHub && <GitHubSidebar onFilesChange={handleFilesChange} savedContext={active?.githubContext} />}
 
         <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Agent status bar */}
+          {agentStatus && (
+            <div className="px-4 py-2 bg-amber-950 border-b border-amber-900 flex items-center gap-2">
+              <span className="animate-spin text-amber-400 text-xs inline-block">⟳</span>
+              <span className="text-amber-300 text-xs">{agentStatus}</span>
+            </div>
+          )}
+
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             {messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center gap-6 text-center">
                 <div>
-                  <div className="text-4xl mb-2">⌘</div>
-                  <h2 className="text-zinc-200 font-semibold text-lg">Your AI coding agent</h2>
+                  <div className="text-4xl mb-2">{agentMode ? "⚡" : "⌘"}</div>
+                  <h2 className="text-zinc-200 font-semibold text-lg">
+                    {agentMode ? "Agent mode" : "Your AI coding agent"}
+                  </h2>
                   <p className="text-zinc-500 text-sm mt-1 max-w-sm">
-                    Chats are saved automatically. Open GitHub to pin files — they stay across sessions.
+                    {agentMode
+                      ? `Give a task. The agent will read your repo, make changes, and stage them for your review before pushing.${!activeRepo ? " Open GitHub sidebar and select a repo first." : ` Working on: ${activeRepo}`}`
+                      : "Chats are saved automatically. Switch to Agent mode to have it autonomously edit your repo."
+                    }
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 max-w-lg w-full">
-                  {QUICK_PROMPTS.map((p) => (
+                  {(agentMode ? AGENT_PROMPTS : QUICK_PROMPTS).map((p) => (
                     <button key={p} onClick={() => sendMessage(p)}
                       className="text-left text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 hover:border-zinc-600 hover:text-zinc-200 transition-colors">
                       {p}
@@ -281,14 +417,42 @@ export default function Home() {
             <div ref={bottomRef} />
           </div>
 
+          {/* Staged changes review panel */}
+          {stagedFiles.length > 0 && (
+            <StagedChanges
+              files={stagedFiles}
+              repo={activeRepo}
+              onPush={() => setStagedFiles([])}
+              onDiscard={() => setStagedFiles([])}
+            />
+          )}
+
+          {/* Input */}
           <div className="border-t border-zinc-800 px-4 py-3 flex-shrink-0 bg-zinc-950">
+            {agentMode && !activeRepo && (
+              <p className="text-amber-500 text-xs mb-2 text-center">
+                ⚠ Select a GitHub repo from the sidebar before using Agent mode
+              </p>
+            )}
             <div className="flex gap-3 items-end max-w-4xl mx-auto">
               <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
-                placeholder={isAuto ? "Ask anything — Auto picks the best model…" : "Ask the coding agent… (Shift+Enter for newline)"}
-                rows={2} className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-zinc-100 text-sm resize-none focus:outline-none focus:border-teal-600 placeholder:text-zinc-600" />
-              <button onClick={() => sendMessage()} disabled={loading || !input.trim()}
+                placeholder={
+                  agentMode
+                    ? activeRepo
+                      ? `Give the agent a task on ${activeRepo.split("/")[1]}… (it will read files, make changes, ask for your approval)`
+                      : "Select a repo first…"
+                    : isAuto
+                    ? "Ask anything — Auto picks the best model…"
+                    : "Ask the coding agent… (Shift+Enter for newline)"
+                }
+                rows={2}
+                className={`flex-1 bg-zinc-800 border rounded-xl px-4 py-3 text-zinc-100 text-sm resize-none focus:outline-none placeholder:text-zinc-600 ${
+                  agentMode ? "border-teal-800 focus:border-teal-600" : "border-zinc-700 focus:border-teal-600"
+                }`}
+              />
+              <button onClick={() => sendMessage()} disabled={loading || !input.trim() || (agentMode && !activeRepo)}
                 className="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl px-4 py-3 text-sm font-medium transition-colors flex-shrink-0">
-                {loading ? "…" : "Send"}
+                {loading ? "…" : agentMode ? "Run" : "Send"}
               </button>
             </div>
           </div>
