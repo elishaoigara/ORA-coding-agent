@@ -263,7 +263,7 @@ export default function Home() {
                       </span>
                     </div>
                   )}
-                  <ChatMessage message={msg} />
+                  <ChatMessage message={msg} activeRepo={activeRepo} />
                 </div>
               ))
             )}
