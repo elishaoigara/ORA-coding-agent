@@ -8,7 +8,6 @@ const GH_BASE = "https://api.github.com";
 const MAX_ITERATIONS = 15;
 
 // ── Phase 1: Plan ─────────────────────────────────────────────────────────────
-// Agent reads the codebase and produces a structured plan. No files are written.
 const PLAN_SYSTEM_PROMPT = `You are a senior software engineer analyzing a codebase to plan changes.
 
 YOUR ONLY JOB IN THIS PHASE:
@@ -50,7 +49,6 @@ OUTPUT FORMAT — at the very end of your response, output your plan as JSON wra
 Write your analysis first in plain text, then end with the <PLAN> block.`;
 
 // ── Phase 2: Execute ──────────────────────────────────────────────────────────
-// Agent executes the approved plan by reading and staging each file.
 function buildExecutePrompt(plan: AgentPlan): string {
   const changesList = plan.changes
     .map((c) => `- ${c.action.toUpperCase()} \`${c.path}\`: ${c.details}`)
@@ -254,7 +252,6 @@ export async function POST(req: NextRequest) {
 
       let iterations = 0;
       let textWasSent = false;
-      let fullResponseText = "";
 
       while (iterations < MAX_ITERATIONS) {
         iterations++;
@@ -297,7 +294,11 @@ export async function POST(req: NextRequest) {
         messages.push(assistantMsg);
 
         // ── Tool calls ──────────────────────────────────────────────────────
-        if (choice.finish_reason === "tool_calls" && assistantMsg.tool_calls?.length) {
+        // FIX: check tool_calls on the message directly, not just finish_reason.
+        // Qwen3 and some other models return finish_reason "stop" even when
+        // tool_calls are present, which caused the agent to skip all tool use
+        // and go straight to the final response — producing a blank screen.
+        if (assistantMsg.tool_calls?.length) {
           for (const toolCall of assistantMsg.tool_calls) {
             const toolName = toolCall.function?.name ?? "unknown";
             let args: Record<string, string> = {};
@@ -319,33 +320,27 @@ export async function POST(req: NextRequest) {
 
         // ── Final response ──────────────────────────────────────────────────
         const rawText: string = (assistantMsg.content ?? "").trim();
-        fullResponseText = rawText;
 
         if (phase === "plan") {
-          // Extract the <PLAN> JSON block
           const planMatch = rawText.match(/<PLAN>([\s\S]*?)<\/PLAN>/);
           const textWithoutPlan = rawText.replace(/<PLAN>[\s\S]*?<\/PLAN>/g, "").trim();
 
-          // Stream the analysis text (without the raw JSON block)
           if (textWithoutPlan) {
             await streamText(textWithoutPlan, send);
             textWasSent = true;
           }
 
-          // Send the parsed plan as a structured event
           if (planMatch) {
             try {
               const parsedPlan: AgentPlan = JSON.parse(planMatch[1].trim());
               send("plan", { plan: parsedPlan });
             } catch {
-              // JSON parse failed — send raw text as fallback plan
               send("plan_error", { text: "Could not parse structured plan. See analysis above." });
             }
           } else {
             send("plan_error", { text: "Agent did not produce a structured plan. See analysis above." });
           }
         } else {
-          // Execute phase — stream the summary
           if (rawText) {
             await streamText(rawText, send);
             textWasSent = true;
@@ -366,6 +361,15 @@ export async function POST(req: NextRequest) {
             "\nReview the diffs below and push when ready.",
           ].join("\n");
           await streamText(summary, send);
+        } else if (phase === "execute" && stagedFiles.length === 0) {
+          // FIX: if execution produced no staged files at all (agent got confused),
+          // send a clear error so the user sees something instead of a blank screen.
+          await streamText(
+            "⚠️ The agent completed but staged no files. This can happen if the model skipped tool calls. " +
+            "Try re-running the task, or switch to a different model (e.g. Qwen3 Max).",
+            send
+          );
+          textWasSent = true;
         } else if (phase === "plan") {
           await streamText("Analysis complete. See the plan below.", send);
         }

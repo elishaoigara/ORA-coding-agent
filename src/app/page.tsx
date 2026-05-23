@@ -230,13 +230,15 @@ export default function Home() {
 
           if (event.type === "done") {
             setAgentStatus("");
-            // Final safety net for blank message
+            // Final safety net for blank assistant message
             setMessages((m) => {
               const last = m[m.length - 1];
               if (last?.role === "assistant" && !last.content.trim()) {
                 const fallback = phase === "plan"
                   ? "Analysis complete. See the plan below."
-                  : "Execution complete. Review staged changes below.";
+                  : staged.length > 0
+                    ? "Execution complete. Review the staged changes below and push when ready."
+                    : "⚠️ Execution finished but no files were staged. Try re-running or switch to Qwen3 Max.";
                 agentText = fallback;
                 return [...m.slice(0, -1), { role: "assistant", content: fallback }];
               }
@@ -298,8 +300,10 @@ export default function Home() {
     setAgentPhase("executing");
     setLoading(true);
     setStagedFiles([]);
+    // FIX: clear the plan panel immediately so the UI doesn't go blank —
+    // the plan card disappears and the executing status bar takes over.
+    setCurrentPlan(null);
 
-    // Add a "plan approved" message to the chat
     const approvalMsg: Message = {
       role: "user",
       content: "✓ Plan approved — execute it now.",
@@ -308,20 +312,35 @@ export default function Home() {
     setMessages(newMessages);
     setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
+    // Snapshot task now — currentTask is a closure over React state and is safe here,
+    // but capturing it explicitly makes the intent clear and avoids stale-closure risk.
+    const taskSnapshot = currentTask;
+
     try {
-      const { agentText } = await runAgentStream("execute", currentTask, approvedPlan);
+      const { agentText, staged } = await runAgentStream("execute", taskSnapshot, approvedPlan);
+
+      // FIX: set phase to "done" so StagedChanges panel renders.
+      // Previously this was correct but currentPlan was cleared in finally AFTER
+      // setAgentPhase("done"), meaning the plan panel would flicker back briefly.
+      // Now currentPlan is cleared above before execution starts.
       setAgentPhase("done");
+
       saveConversation(
         [...newMessages, { role: "assistant", content: agentText }],
         selectedProviderId, selectedModel, active?.project ?? projectInput
       );
+
+      // If somehow staged files came back from the stream but setStagedFiles
+      // inside runAgentStream didn't fire (race condition), set them here as a safety net.
+      if (staged.length > 0) {
+        setStagedFiles((existing) => existing.length > 0 ? existing : staged);
+      }
     } catch (e) {
       setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `❌ ${(e as Error).message}` }]);
       setAgentPhase("idle");
     } finally {
       setLoading(false);
       setAgentStatus("");
-      setCurrentPlan(null);
     }
   }
 
@@ -447,10 +466,19 @@ export default function Home() {
         {showGitHub && <GitHubSidebar onFilesChange={handleFilesChange} savedContext={active?.githubContext} />}
 
         <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Agent status bar — shown while planning or executing */}
           {agentStatus && (
             <div className="px-4 py-2 bg-amber-950 border-b border-amber-900 flex items-center gap-2 flex-shrink-0">
               <span className="animate-spin text-amber-400 text-xs inline-block">⟳</span>
               <span className="text-amber-300 text-xs">{agentStatus}</span>
+            </div>
+          )}
+
+          {/* Executing indicator — shown when agentStatus is blank mid-execution */}
+          {agentPhase === "executing" && !agentStatus && (
+            <div className="px-4 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center gap-2 flex-shrink-0">
+              <span className="animate-spin text-teal-400 text-xs inline-block">⟳</span>
+              <span className="text-zinc-400 text-xs">Executing plan — writing files…</span>
             </div>
           )}
 
@@ -515,8 +543,8 @@ export default function Home() {
             />
           )}
 
-          {/* Staged changes panel — shown after execution */}
-          {stagedFiles.length > 0 && agentPhase !== "awaiting_approval" && (
+          {/* Staged changes panel — shown after execution completes with files */}
+          {stagedFiles.length > 0 && agentPhase !== "awaiting_approval" && agentPhase !== "executing" && (
             <StagedChanges
               files={stagedFiles}
               repo={activeRepo}
