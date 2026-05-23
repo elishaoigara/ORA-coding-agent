@@ -189,6 +189,53 @@ export interface AgentPlan {
   }[];
 }
 
+// ── Determine if this provider needs Qwen-specific request params ─────────────
+function isQwenProvider(baseUrl: string): boolean {
+  return baseUrl.includes("dashscope") || baseUrl.includes("aliyun");
+}
+
+// ── Build the fetch headers — skip anthropic-version for non-Anthropic ─────────
+function llmHeaders(apiKey: string, baseUrl: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+  };
+  // Only send anthropic-version to Anthropic's own API
+  if (baseUrl.includes("anthropic.com")) {
+    headers["anthropic-version"] = "2023-06-01";
+  }
+  return headers;
+}
+
+// ── Build the request body, adding Qwen-specific params when needed ────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildRequestBody(params: {
+  model: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  messages: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools: any[];
+  baseUrl: string;
+}) {
+  const body: Record<string, unknown> = {
+    model: params.model,
+    messages: params.messages,
+    tools: params.tools,
+    tool_choice: "auto",
+    max_tokens: 4096,
+    temperature: 0.2,
+    stream: false,
+  };
+
+  // Qwen3 models have "thinking" mode enabled by default which breaks
+  // structured tool calling. Must explicitly disable it.
+  if (isQwenProvider(params.baseUrl)) {
+    body.enable_thinking = false;
+  }
+
+  return body;
+}
+
 // ── Main route ────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   let body: {
@@ -242,10 +289,8 @@ export async function POST(req: NextRequest) {
       const phaseLabel = phase === "plan" ? "Analysing codebase" : "Executing plan";
       send("progress", { text: `${phaseLabel} on **${repo}** using ${provider.name} / ${agentModel}…` });
 
-      const systemPrompt =
-        phase === "plan"
-          ? PLAN_SYSTEM_PROMPT
-          : buildExecutePrompt(plan!);
+      const systemPrompt = phase === "plan" ? PLAN_SYSTEM_PROMPT : buildExecutePrompt(plan!);
+      const activeTools  = phase === "plan" ? planTools : AGENT_TOOLS;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const messages: any[] = [{ role: "user", content: task }];
@@ -260,25 +305,20 @@ export async function POST(req: NextRequest) {
         try {
           const res = await fetch(`${provider.baseUrl}/chat/completions`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${provider.apiKey}`,
-              "anthropic-version": "2023-06-01",
-            },
-            body: JSON.stringify({
-              model: agentModel,
-              messages: [{ role: "system", content: systemPrompt }, ...messages],
-              tools: phase === "plan" ? planTools : AGENT_TOOLS,
-              tool_choice: "auto",
-              max_tokens: 4096,
-              temperature: 0.2,
-              stream: false,
-            }),
+            headers: llmHeaders(provider.apiKey, provider.baseUrl),
+            body: JSON.stringify(
+              buildRequestBody({
+                model: agentModel,
+                messages: [{ role: "system", content: systemPrompt }, ...messages],
+                tools: activeTools,
+                baseUrl: provider.baseUrl,
+              })
+            ),
           });
 
           if (!res.ok) {
             const errText = await res.text();
-            send("error", { text: `LLM error (${res.status}): ${errText.slice(0, 300)}` });
+            send("error", { text: `LLM error (${res.status}): ${errText.slice(0, 500)}` });
             break;
           }
           llmResponse = await res.json();
@@ -288,16 +328,18 @@ export async function POST(req: NextRequest) {
         }
 
         const choice = llmResponse.choices?.[0];
-        if (!choice) { send("error", { text: "Empty response from LLM." }); break; }
+        if (!choice) {
+          send("error", { text: `Empty response from LLM. Raw: ${JSON.stringify(llmResponse).slice(0, 200)}` });
+          break;
+        }
 
         const assistantMsg = choice.message;
         messages.push(assistantMsg);
 
         // ── Tool calls ──────────────────────────────────────────────────────
-        // FIX: check tool_calls on the message directly, not just finish_reason.
-        // Qwen3 and some other models return finish_reason "stop" even when
-        // tool_calls are present, which caused the agent to skip all tool use
-        // and go straight to the final response — producing a blank screen.
+        // KEY FIX: Check tool_calls on the message directly — do NOT rely on
+        // finish_reason alone. Qwen3 returns finish_reason "stop" even when
+        // tool_calls are present, which caused the agent to skip all tool use.
         if (assistantMsg.tool_calls?.length) {
           for (const toolCall of assistantMsg.tool_calls) {
             const toolName = toolCall.function?.name ?? "unknown";
@@ -315,10 +357,10 @@ export async function POST(req: NextRequest) {
             const result = await executeTool(toolName, args, repo, stagedFiles);
             messages.push({ role: "tool", tool_call_id: toolCall.id, content: result });
           }
-          continue;
+          continue; // loop back to call LLM again with tool results
         }
 
-        // ── Final response ──────────────────────────────────────────────────
+        // ── Final text response ─────────────────────────────────────────────
         const rawText: string = (assistantMsg.content ?? "").trim();
 
         if (phase === "plan") {
@@ -341,6 +383,7 @@ export async function POST(req: NextRequest) {
             send("plan_error", { text: "Agent did not produce a structured plan. See analysis above." });
           }
         } else {
+          // Execute phase
           if (rawText) {
             await streamText(rawText, send);
             textWasSent = true;
@@ -350,7 +393,7 @@ export async function POST(req: NextRequest) {
         break;
       }
 
-      // Fallback if model returned no text
+      // ── Fallback message if agent produced no text ──────────────────────
       if (!textWasSent) {
         if (phase === "execute" && stagedFiles.length > 0) {
           const summary = [
@@ -362,19 +405,18 @@ export async function POST(req: NextRequest) {
           ].join("\n");
           await streamText(summary, send);
         } else if (phase === "execute" && stagedFiles.length === 0) {
-          // FIX: if execution produced no staged files at all (agent got confused),
-          // send a clear error so the user sees something instead of a blank screen.
           await streamText(
-            "⚠️ The agent completed but staged no files. This can happen if the model skipped tool calls. " +
-            "Try re-running the task, or switch to a different model (e.g. Qwen3 Max).",
+            "⚠️ The agent finished but staged no files. " +
+            "This usually means the model didn't use its tools. " +
+            "Try switching to Qwen3 Max or DeepSeek V3 and re-running the task.",
             send
           );
-          textWasSent = true;
         } else if (phase === "plan") {
           await streamText("Analysis complete. See the plan below.", send);
         }
       }
 
+      // ── Emit staged files event ─────────────────────────────────────────
       if (phase === "execute" && stagedFiles.length > 0) {
         send("staged", { files: stagedFiles });
       }
