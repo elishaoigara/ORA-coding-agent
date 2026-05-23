@@ -3,22 +3,23 @@ import { getProvider, getAllPublicProviders } from "@/lib/providers";
 import { routeMessage } from "@/lib/autoRouter";
 import type { ChatRequest, InjectedFile } from "@/types";
 
-const SYSTEM_PROMPT = `You are an expert AI coding agent. You help developers write, debug, refactor, review, and understand code across all languages and frameworks.
-
-Guidelines:
-- Always wrap code blocks in triple backticks with the correct language tag (e.g. \`\`\`typescript)
-- Be concise but complete — don't truncate working code
-- When given file context, reference it specifically (e.g. "In your utils.ts on line 12...")
-- Point out edge cases, potential bugs, or performance issues proactively
-- When debugging, explain the root cause before showing the fix
-- Prefer idiomatic, modern patterns for the language being used`;
+const SYSTEM_PROMPT = `You are an expert coding agent. Rules:
+- Never truncate code — always output complete, working files
+- Wrap code in triple backticks with the correct language tag
+- Reference injected files by name and line number when relevant
+- Flag bugs, edge cases, and performance issues proactively
+- Use modern, idiomatic patterns for the language being used`;
 
 function buildContextBlock(files: InjectedFile[]): string {
   if (!files.length) return "";
-  const parts = files.map(
-    (f) => `### File: ${f.repo}/${f.path}\n\`\`\`\n${f.content}\n\`\`\``
-  );
-  return `<context>\nThe user has shared these files from their GitHub repo:\n\n${parts.join("\n\n")}\n</context>\n\n`;
+  const parts = files.map((f) => {
+    const lines = f.content.split("\n");
+    const truncated = lines.length > 150
+      ? lines.slice(0, 150).join("\n") + `\n// ... (${lines.length - 150} more lines — ask to see a specific section)`
+      : f.content;
+    return `### ${f.repo}/${f.path}\n\`\`\`\n${truncated}\n\`\`\``;
+  });
+  return `<context>\n${parts.join("\n\n")}\n</context>\n\n`;
 }
 
 export async function POST(req: NextRequest) {
@@ -71,12 +72,21 @@ export async function POST(req: NextRequest) {
     return m;
   });
 
+  const maxTokensMap: Record<string, number> = {
+    groq: 32768,
+    deepseek: 8192,
+    openai: 16384,
+    anthropic: 16000,
+    qwen: 8192,
+  };
+  const maxTokens = maxTokensMap[resolvedProviderId] ?? 8192;
+
   const payload = {
     model: resolvedModel || provider.defaultModel,
     messages: [{ role: "system", content: SYSTEM_PROMPT }, ...enrichedMessages],
     stream: true,
-    max_tokens: 4096,
-    temperature: 0.3,
+    max_tokens: maxTokens,
+    temperature: 0.2,
   };
 
   try {
