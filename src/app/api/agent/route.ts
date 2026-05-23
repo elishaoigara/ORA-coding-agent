@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProvider } from "@/lib/providers";
 import { AGENT_TOOLS, type StagedFile } from "@/lib/agentTools";
 
-// Extend Vercel serverless timeout — agent needs time for multiple GitHub API calls
 export const maxDuration = 60;
 
 const GH_BASE = "https://api.github.com";
@@ -42,7 +41,6 @@ async function executeTool(
   const headers = ghHeaders(pat);
 
   try {
-    // ── read_file ──────────────────────────────────────────────────────────
     if (name === "read_file") {
       const res = await fetch(`${GH_BASE}/repos/${repo}/contents/${args.path}`, { headers });
       if (!res.ok) return JSON.stringify({ error: `File not found: ${args.path}` });
@@ -52,7 +50,6 @@ async function executeTool(
       return JSON.stringify({ path: args.path, content, lines: content.split("\n").length });
     }
 
-    // ── list_files ─────────────────────────────────────────────────────────
     if (name === "list_files") {
       const path = args.path ?? "";
       const res = await fetch(`${GH_BASE}/repos/${repo}/contents/${path}`, { headers });
@@ -69,29 +66,25 @@ async function executeTool(
       );
     }
 
-    // ── search_files ───────────────────────────────────────────────────────
     if (name === "search_files") {
-      // GitHub code search — may hit rate limits on free tier, gracefully fallback
       const q = encodeURIComponent(`${args.pattern} repo:${repo}`);
       const res = await fetch(`${GH_BASE}/search/code?q=${q}&per_page=10`, {
         headers: { ...headers, Accept: "application/vnd.github+json" },
       });
       if (!res.ok) {
         return JSON.stringify({
-          note: "Search rate limited. Use list_files to explore and read_file to inspect files.",
+          note: "Search unavailable. Use list_files to explore and read_file to inspect files.",
           pattern: args.pattern,
         });
       }
       const data = await res.json();
-      const results = (data.items ?? []).slice(0, 10).map(
-        (i: { path: string; name: string }) => ({ path: i.path, name: i.name })
-      );
+      const results = (data.items ?? [])
+        .slice(0, 10)
+        .map((i: { path: string; name: string }) => ({ path: i.path, name: i.name }));
       return JSON.stringify({ results, count: results.length });
     }
 
-    // ── stage_file ─────────────────────────────────────────────────────────
     if (name === "stage_file") {
-      // Fetch original content for diff display (if file already exists)
       let originalContent: string | null = null;
       const existing = await fetch(`${GH_BASE}/repos/${repo}/contents/${args.path}`, { headers });
       if (existing.ok) {
@@ -120,7 +113,7 @@ async function executeTool(
         path: args.path,
         status: originalContent !== null ? "modified" : "new file",
         lines: args.content.split("\n").length,
-        message: "File staged. It will NOT be pushed until the user reviews and approves.",
+        message: "Staged. Will NOT be pushed until user approves.",
       });
     }
 
@@ -130,13 +123,23 @@ async function executeTool(
   }
 }
 
+async function streamText(
+  text: string,
+  send: (type: string, payload?: Record<string, unknown>) => void
+) {
+  const words = text.split(" ");
+  const chunkSize = 8;
+  for (let i = 0; i < words.length; i += chunkSize) {
+    const chunk =
+      words.slice(i, i + chunkSize).join(" ") +
+      (i + chunkSize < words.length ? " " : "");
+    send("text", { text: chunk });
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 export async function POST(req: NextRequest) {
-  let body: {
-    task: string;
-    repo: string;
-    provider?: string;
-    model?: string;
-  };
+  let body: { task: string; repo: string; provider?: string; model?: string };
 
   try {
     body = await req.json();
@@ -170,17 +173,16 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${data}\n\n`));
       }
 
-      send("progress", { text: `Agent starting on **${repo}** using ${provider.name} / ${agentModel}…` });
+      send("progress", {
+        text: `Agent starting on **${repo}** using ${provider.name} / ${agentModel}…`,
+      });
 
-      // Conversation history for the agentic loop
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const messages: any[] = [
-        { role: "user", content: task },
-      ];
+      const messages: any[] = [{ role: "user", content: task }];
 
       let iterations = 0;
+      let textWasSent = false;
 
-      // ── Agentic loop ───────────────────────────────────────────────────────
       while (iterations < MAX_ITERATIONS) {
         iterations++;
 
@@ -195,10 +197,7 @@ export async function POST(req: NextRequest) {
             },
             body: JSON.stringify({
               model: agentModel,
-              messages: [
-                { role: "system", content: AGENT_SYSTEM_PROMPT },
-                ...messages,
-              ],
+              messages: [{ role: "system", content: AGENT_SYSTEM_PROMPT }, ...messages],
               tools: AGENT_TOOLS,
               tool_choice: "auto",
               max_tokens: 4096,
@@ -209,7 +208,7 @@ export async function POST(req: NextRequest) {
 
           if (!res.ok) {
             const errText = await res.text();
-            send("error", { text: `LLM error (${res.status}): ${errText.slice(0, 200)}` });
+            send("error", { text: `LLM error (${res.status}): ${errText.slice(0, 300)}` });
             break;
           }
 
@@ -221,25 +220,22 @@ export async function POST(req: NextRequest) {
 
         const choice = llmResponse.choices?.[0];
         if (!choice) {
-          send("error", { text: "Empty response from LLM" });
+          send("error", { text: "Empty response from LLM." });
           break;
         }
 
         const assistantMsg = choice.message;
-
-        // Always add the assistant message to history
         messages.push(assistantMsg);
 
-        // ── Tool calls ───────────────────────────────────────────────────────
+        // ── Tool calls ─────────────────────────────────────────────────────
         if (choice.finish_reason === "tool_calls" && assistantMsg.tool_calls?.length) {
           for (const toolCall of assistantMsg.tool_calls) {
             const toolName = toolCall.function?.name ?? "unknown";
             let args: Record<string, string> = {};
             try {
               args = JSON.parse(toolCall.function.arguments ?? "{}");
-            } catch { /* malformed args — use empty */ }
+            } catch { /* use empty */ }
 
-            // Progress label
             const labels: Record<string, string> = {
               read_file:    `Reading \`${args.path}\`…`,
               list_files:   `Exploring \`${args.path || "/"}\`…`,
@@ -248,45 +244,57 @@ export async function POST(req: NextRequest) {
             };
             send("tool_call", { text: labels[toolName] ?? `Calling ${toolName}…` });
 
-            // Execute the tool
             const result = await executeTool(toolName, args, repo, stagedFiles);
 
-            // ── KEY FIX: each tool result is its own message in OpenAI format ──
-            // This is what was broken before — mixing formats caused blank responses
+            // One message per tool result — this is the correct OpenAI format
             messages.push({
               role: "tool",
               tool_call_id: toolCall.id,
               content: result,
             });
           }
-
-          // Continue the loop — let the LLM process tool results
-          continue;
+          continue; // back to top of loop
         }
 
-        // ── Final answer — stream the text back ──────────────────────────────
-        const finalText: string = assistantMsg.content ?? "";
+        // ── Final answer ───────────────────────────────────────────────────
+        // Some models (Qwen3, GPT-4o) return content: null after tool calls.
+        // In that case we auto-generate a summary from staged files.
+        const finalText: string = (assistantMsg.content ?? "").trim();
+
         if (finalText) {
-          // Chunk into ~10 word pieces for smooth streaming effect
-          const words = finalText.split(" ");
-          const chunkSize = 8;
-          for (let i = 0; i < words.length; i += chunkSize) {
-            const chunk = words.slice(i, i + chunkSize).join(" ") + (i + chunkSize < words.length ? " " : "");
-            send("text", { text: chunk });
-            // Small delay for streaming feel
-            await new Promise((r) => setTimeout(r, 10));
-          }
+          await streamText(finalText, send);
+          textWasSent = true;
         }
 
-        break; // Done
+        break;
       }
 
-      // ── Send staged files to client for review ────────────────────────────
+      // ── Fallback: model never wrote a text summary ─────────────────────
+      // This happens when models consider tool calls to BE their response.
+      if (!textWasSent) {
+        if (stagedFiles.length > 0) {
+          const summary = [
+            "I've completed the task. Here's what I changed:\n",
+            ...stagedFiles.map(
+              (f) =>
+                `- \`${f.path}\` — ${
+                  f.originalContent === null ? "**new file**" : "**modified**"
+                }: ${f.description}`
+            ),
+            "\nReview the staged changes below and push when ready.",
+          ].join("\n");
+          await streamText(summary, send);
+        } else {
+          await streamText(
+            "I explored the repository but didn't find anything that needed changing for this task.",
+            send
+          );
+        }
+      }
+
+      // ── Send staged files to client ─────────────────────────────────────
       if (stagedFiles.length > 0) {
         send("staged", { files: stagedFiles });
-        send("progress", { text: `Done. ${stagedFiles.length} file(s) staged — review below before pushing.` });
-      } else {
-        send("progress", { text: "Done. No files were staged." });
       }
 
       send("done", { iterations, stagedCount: stagedFiles.length });

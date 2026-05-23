@@ -23,29 +23,30 @@ const AGENT_PROMPTS = [
   "Add JSDoc comments to all exported functions",
 ];
 
-interface RoutingBadge { provider: string; model: string; reason: string; }
+interface RoutingBadge {
+  provider: string;
+  model: string;
+  reason: string;
+}
 
 export default function Home() {
-  const [messages, setMessages]       = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [routingBadges, setRoutingBadges] = useState<Record<number, RoutingBadge>>({});
-  const [input, setInput]             = useState("");
-  const [loading, setLoading]         = useState(false);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
   const [injectedFiles, setInjectedFiles] = useState<InjectedFile[]>([]);
-  const [activeRepo, setActiveRepo]   = useState("");
-  const [providers, setProviders]     = useState<PublicProvider[]>([]);
+  const [activeRepo, setActiveRepo] = useState("");
+  const [providers, setProviders] = useState<PublicProvider[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState("auto");
   const [selectedModel, setSelectedModel] = useState("");
-  const [password]                    = useState("local");
+  const [password] = useState("local");
   const [showHistory, setShowHistory] = useState(true);
-  const [showGitHub, setShowGitHub]   = useState(false);
+  const [showGitHub, setShowGitHub] = useState(false);
   const [projectInput, setProjectInput] = useState("");
   const [editingProject, setEditingProject] = useState(false);
-
-  // Agent mode
-  const [agentMode, setAgentMode]     = useState(false);
+  const [agentMode, setAgentMode] = useState(false);
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [agentStatus, setAgentStatus] = useState("");
-
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -55,7 +56,9 @@ export default function Home() {
   } = useConversations();
 
   useEffect(() => {
-    fetch("/api/provider").then((r) => r.json()).then((data: PublicProvider[]) => setProviders(data));
+    fetch("/api/provider")
+      .then((r) => r.json())
+      .then((data: PublicProvider[]) => setProviders(data));
   }, []);
 
   useEffect(() => {
@@ -99,7 +102,7 @@ export default function Home() {
     if (activeId && repo) saveGitHubContext(repo, files);
   }
 
-  // ── Normal chat ─────────────────────────────────────────────────────────────
+  // ── Normal chat ──────────────────────────────────────────────────────────────
   async function sendChat(userText: string) {
     const newMessages: Message[] = [...messages, { role: "user", content: userText }];
     setMessages(newMessages);
@@ -111,12 +114,20 @@ export default function Home() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-app-password": password },
-        body: JSON.stringify({ messages: newMessages, model: selectedModel, provider: selectedProviderId, injectedFiles }),
+        body: JSON.stringify({
+          messages: newMessages,
+          model: selectedModel,
+          provider: selectedProviderId,
+          injectedFiles,
+        }),
       });
 
       if (!res.ok) {
         const err = await res.json();
-        setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `❌ Error: ${err.error}` }]);
+        setMessages((m) => [
+          ...m.slice(0, -1),
+          { role: "assistant", content: `❌ Error: ${err.error}` },
+        ]);
         return;
       }
 
@@ -125,7 +136,10 @@ export default function Home() {
         const routedModel    = res.headers.get("X-Routed-Model") ?? "";
         const routeReason    = res.headers.get("X-Route-Reason") ?? "";
         if (routedProvider) {
-          setRoutingBadges((b) => ({ ...b, [assistantIndex]: { provider: routedProvider, model: routedModel, reason: routeReason } }));
+          setRoutingBadges((b) => ({
+            ...b,
+            [assistantIndex]: { provider: routedProvider, model: routedModel, reason: routeReason },
+          }));
         }
       }
 
@@ -145,30 +159,50 @@ export default function Home() {
             const parsed = JSON.parse(data);
             const delta  = parsed.choices?.[0]?.delta?.content ?? "";
             fullText += delta;
-            setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: fullText }]);
+            setMessages((m) => [
+              ...m.slice(0, -1),
+              { role: "assistant", content: fullText },
+            ]);
           } catch { /* incomplete chunk */ }
         }
       }
 
-      const finalMessages: Message[] = [...newMessages, { role: "assistant", content: fullText }];
-      const ghCtx: GitHubContext | undefined = activeRepo && injectedFiles.length
-        ? { repo: activeRepo, files: injectedFiles, pinnedAt: Date.now() }
-        : undefined;
-      saveConversation(finalMessages, selectedProviderId, selectedModel, active?.project ?? projectInput, ghCtx);
-
+      const finalMessages: Message[] = [
+        ...newMessages,
+        { role: "assistant", content: fullText },
+      ];
+      const ghCtx: GitHubContext | undefined =
+        activeRepo && injectedFiles.length
+          ? { repo: activeRepo, files: injectedFiles, pinnedAt: Date.now() }
+          : undefined;
+      saveConversation(
+        finalMessages,
+        selectedProviderId,
+        selectedModel,
+        active?.project ?? projectInput,
+        ghCtx
+      );
     } catch (e) {
-      setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `Network error: ${(e as Error).message}` }]);
+      setMessages((m) => [
+        ...m.slice(0, -1),
+        { role: "assistant", content: `Network error: ${(e as Error).message}` },
+      ]);
     } finally {
       setLoading(false);
     }
   }
 
-  // ── Agent task ──────────────────────────────────────────────────────────────
+  // ── Agent task ───────────────────────────────────────────────────────────────
   async function sendAgentTask(userText: string) {
     if (!activeRepo) {
-      setMessages((m) => [...m,
+      setMessages((m) => [
+        ...m,
         { role: "user", content: userText },
-        { role: "assistant", content: "⚠️ Open the GitHub sidebar and select a repo first — the agent needs a repo to read and modify files." },
+        {
+          role: "assistant",
+          content:
+            "⚠️ Open the GitHub sidebar and select a repo first — the agent needs a repo to read and modify files.",
+        },
       ]);
       return;
     }
@@ -189,14 +223,22 @@ export default function Home() {
         body: JSON.stringify({
           task: userText,
           repo: activeRepo,
-          provider: isAuto ? "qwen" : selectedProviderId, // prefer qwen for agent (best tool calling)
-          model:    isAuto ? "qwen3-coder-plus" : (selectedModel === "deepseek-reasoner" ? "deepseek-chat" : selectedModel),
+          // Prefer qwen for agent tasks (best tool-call accuracy); never use reasoner
+          provider: isAuto ? "qwen" : selectedProviderId,
+          model: isAuto
+            ? "qwen3-coder-plus"
+            : selectedModel === "deepseek-reasoner"
+            ? "deepseek-chat"
+            : selectedModel,
         }),
       });
 
       if (!res.ok) {
         const err = await res.json();
-        setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `❌ Agent error: ${err.error}` }]);
+        setMessages((m) => [
+          ...m.slice(0, -1),
+          { role: "assistant", content: `❌ Agent error: ${err.error}` },
+        ]);
         return;
       }
 
@@ -206,6 +248,7 @@ export default function Home() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+
         const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split("\n").filter((l) => l.startsWith("data: "));
 
@@ -214,31 +257,66 @@ export default function Home() {
             const event = JSON.parse(line.slice(6));
 
             if (event.type === "progress" || event.type === "tool_call") {
-              setAgentStatus(event.text);
+              setAgentStatus(event.text ?? "");
             }
 
             if (event.type === "text") {
-              agentText += event.text;
-              setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: agentText }]);
+              agentText += event.text ?? "";
+              setMessages((m) => [
+                ...m.slice(0, -1),
+                { role: "assistant", content: agentText },
+              ]);
             }
 
             if (event.type === "staged") {
-              setStagedFiles(event.files);
+              setStagedFiles(event.files ?? []);
+            }
+
+            if (event.type === "error") {
+              // Surface LLM/tool errors directly in the chat bubble
+              const errMsg = agentText
+                ? `${agentText}\n\n❌ ${event.text}`
+                : `❌ ${event.text}`;
+              setMessages((m) => [
+                ...m.slice(0, -1),
+                { role: "assistant", content: errMsg },
+              ]);
+              agentText = errMsg;
             }
 
             if (event.type === "done") {
               setAgentStatus("");
-            }
 
-          } catch { /* incomplete JSON */ }
+              // Final safety net: if the message bubble is still empty, show fallback
+              setMessages((m) => {
+                const last = m[m.length - 1];
+                if (last?.role === "assistant" && !last.content.trim()) {
+                  const fallback = "Agent completed. Review the staged changes below.";
+                  agentText = fallback;
+                  return [...m.slice(0, -1), { role: "assistant", content: fallback }];
+                }
+                return m;
+              });
+            }
+          } catch { /* incomplete JSON chunk — skip */ }
         }
       }
 
-      const finalMessages: Message[] = [...newMessages, { role: "assistant", content: agentText }];
-      saveConversation(finalMessages, selectedProviderId, selectedModel, active?.project ?? projectInput);
-
+      const finalMessages: Message[] = [
+        ...newMessages,
+        { role: "assistant", content: agentText || "Agent completed." },
+      ];
+      saveConversation(
+        finalMessages,
+        selectedProviderId,
+        selectedModel,
+        active?.project ?? projectInput
+      );
     } catch (e) {
-      setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `Network error: ${(e as Error).message}` }]);
+      setMessages((m) => [
+        ...m.slice(0, -1),
+        { role: "assistant", content: `Network error: ${(e as Error).message}` },
+      ]);
     } finally {
       setLoading(false);
       setAgentStatus("");
@@ -276,19 +354,37 @@ export default function Home() {
     <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden">
       {/* Header */}
       <header className="border-b border-zinc-800 px-4 py-2.5 flex items-center gap-3 flex-shrink-0 bg-zinc-950">
-        <button onClick={() => setShowHistory((s) => !s)} className="text-zinc-500 hover:text-zinc-200 text-xs" title="History">🕐</button>
-        <span className="text-teal-400 font-mono font-bold tracking-tight">code<span className="text-zinc-400">agent</span></span>
+        <button
+          onClick={() => setShowHistory((s) => !s)}
+          className="text-zinc-500 hover:text-zinc-200 text-xs"
+          title="History"
+        >
+          🕐
+        </button>
+        <span className="text-teal-400 font-mono font-bold tracking-tight">
+          code<span className="text-zinc-400">agent</span>
+        </span>
 
         {/* Project tag */}
         <div className="flex items-center gap-1">
           {editingProject ? (
-            <input value={projectInput} onChange={(e) => setProjectInput(e.target.value)}
+            <input
+              value={projectInput}
+              onChange={(e) => setProjectInput(e.target.value)}
               onBlur={handleProjectSave}
-              onKeyDown={(e) => { if (e.key === "Enter") handleProjectSave(); if (e.key === "Escape") setEditingProject(false); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleProjectSave();
+                if (e.key === "Escape") setEditingProject(false);
+              }}
               placeholder="Project name…"
-              className="bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-zinc-300 text-xs w-32 focus:outline-none focus:border-teal-600" autoFocus />
+              className="bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-zinc-300 text-xs w-32 focus:outline-none focus:border-teal-600"
+              autoFocus
+            />
           ) : (
-            <button onClick={() => setEditingProject(true)} className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 hover:border-zinc-600 rounded px-2 py-0.5 transition-colors">
+            <button
+              onClick={() => setEditingProject(true)}
+              className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 hover:border-zinc-600 rounded px-2 py-0.5 transition-colors"
+            >
               {active?.project || projectInput || "＋ project"}
             </button>
           )}
@@ -298,36 +394,55 @@ export default function Home() {
         <div className="flex items-center bg-zinc-800 border border-zinc-700 rounded-lg p-0.5 gap-0.5">
           <button
             onClick={() => setAgentMode(false)}
-            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${!agentMode ? "bg-zinc-600 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
+            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${
+              !agentMode ? "bg-zinc-600 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+            }`}
           >
             Chat
           </button>
           <button
             onClick={() => setAgentMode(true)}
-            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${agentMode ? "bg-teal-800 text-teal-100" : "text-zinc-500 hover:text-zinc-300"}`}
+            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${
+              agentMode ? "bg-teal-800 text-teal-100" : "text-zinc-500 hover:text-zinc-300"
+            }`}
           >
             ⚡ Agent
           </button>
         </div>
 
-        {/* Provider selector */}
+        {/* Provider + model selector */}
         <div className="flex items-center gap-2">
-          <select value={selectedProviderId} onChange={(e) => handleProviderChange(e.target.value)}
-            className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600">
+          <select
+            value={selectedProviderId}
+            onChange={(e) => handleProviderChange(e.target.value)}
+            className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600"
+          >
             <option value="auto">⚡ Auto</option>
             <option disabled>──────────</option>
             {providers.map((p) => (
-              <option key={p.id} value={p.id} disabled={!p.configured}>{p.name}{!p.configured ? " (no key)" : ""}</option>
+              <option key={p.id} value={p.id} disabled={!p.configured}>
+                {p.name}{!p.configured ? " (no key)" : ""}
+              </option>
             ))}
           </select>
           {!isAuto && activeProvider && (
             <>
               <span className="text-zinc-700 text-xs">/</span>
-              <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}
-                className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600">
-                {activeProvider.models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600"
+              >
+                {activeProvider.models.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
               </select>
             </>
+          )}
+          {isAuto && (
+            <span className="text-xs text-amber-400 bg-amber-950 border border-amber-800 rounded-full px-2 py-0.5">
+              picks best model
+            </span>
           )}
         </div>
 
@@ -342,33 +457,52 @@ export default function Home() {
               📌 {injectedFiles.length} file{injectedFiles.length > 1 ? "s" : ""}
             </span>
           )}
-          <button onClick={() => setShowGitHub((s) => !s)}
-            className={`text-xs transition-colors ${showGitHub ? "text-teal-400" : "text-zinc-500 hover:text-zinc-300"}`}>
+          <button
+            onClick={() => setShowGitHub((s) => !s)}
+            className={`text-xs transition-colors ${
+              showGitHub ? "text-teal-400" : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
             GitHub
           </button>
         </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
+        {/* History sidebar */}
         {showHistory && (
           <div className="w-60 border-r border-zinc-800 flex flex-col bg-zinc-950 flex-shrink-0">
-            <div className="px-3 py-2 border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">History</div>
-            <ConversationList conversations={conversations} activeId={activeId}
-              onSelect={loadConversation} onNew={handleNewChat} onDelete={deleteConversation} />
+            <div className="px-3 py-2 border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
+              History
+            </div>
+            <ConversationList
+              conversations={conversations}
+              activeId={activeId}
+              onSelect={loadConversation}
+              onNew={handleNewChat}
+              onDelete={deleteConversation}
+            />
           </div>
         )}
 
-        {showGitHub && <GitHubSidebar onFilesChange={handleFilesChange} savedContext={active?.githubContext} />}
+        {/* GitHub sidebar */}
+        {showGitHub && (
+          <GitHubSidebar
+            onFilesChange={handleFilesChange}
+            savedContext={active?.githubContext}
+          />
+        )}
 
         <main className="flex-1 flex flex-col overflow-hidden">
           {/* Agent status bar */}
           {agentStatus && (
-            <div className="px-4 py-2 bg-amber-950 border-b border-amber-900 flex items-center gap-2">
+            <div className="px-4 py-2 bg-amber-950 border-b border-amber-900 flex items-center gap-2 flex-shrink-0">
               <span className="animate-spin text-amber-400 text-xs inline-block">⟳</span>
               <span className="text-amber-300 text-xs">{agentStatus}</span>
             </div>
           )}
 
+          {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             {messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center gap-6 text-center">
@@ -379,15 +513,19 @@ export default function Home() {
                   </h2>
                   <p className="text-zinc-500 text-sm mt-1 max-w-sm">
                     {agentMode
-                      ? `Give a task. The agent will read your repo, make changes, and stage them for your review before pushing.${!activeRepo ? " Open GitHub sidebar and select a repo first." : ` Working on: ${activeRepo}`}`
-                      : "Chats are saved automatically. Switch to Agent mode to have it autonomously edit your repo."
-                    }
+                      ? activeRepo
+                        ? `Give a task. The agent will read your repo, make changes, and stage them for review before pushing. Working on: ${activeRepo}`
+                        : "Open the GitHub sidebar and select a repo first."
+                      : "Chats are saved automatically. Switch to Agent mode to have it autonomously edit your repo."}
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 max-w-lg w-full">
                   {(agentMode ? AGENT_PROMPTS : QUICK_PROMPTS).map((p) => (
-                    <button key={p} onClick={() => sendMessage(p)}
-                      className="text-left text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 hover:border-zinc-600 hover:text-zinc-200 transition-colors">
+                    <button
+                      key={p}
+                      onClick={() => sendMessage(p)}
+                      className="text-left text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 hover:border-zinc-600 hover:text-zinc-200 transition-colors"
+                    >
                       {p}
                     </button>
                   ))}
@@ -407,6 +545,7 @@ export default function Home() {
                 </div>
               ))
             )}
+
             {loading && messages[messages.length - 1]?.content === "" && (
               <div className="flex gap-2 text-zinc-500 text-sm ml-10">
                 <span className="animate-pulse">●</span>
@@ -435,7 +574,10 @@ export default function Home() {
               </p>
             )}
             <div className="flex gap-3 items-end max-w-4xl mx-auto">
-              <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
                 placeholder={
                   agentMode
                     ? activeRepo
@@ -447,11 +589,16 @@ export default function Home() {
                 }
                 rows={2}
                 className={`flex-1 bg-zinc-800 border rounded-xl px-4 py-3 text-zinc-100 text-sm resize-none focus:outline-none placeholder:text-zinc-600 ${
-                  agentMode ? "border-teal-800 focus:border-teal-600" : "border-zinc-700 focus:border-teal-600"
+                  agentMode
+                    ? "border-teal-800 focus:border-teal-600"
+                    : "border-zinc-700 focus:border-teal-600"
                 }`}
               />
-              <button onClick={() => sendMessage()} disabled={loading || !input.trim() || (agentMode && !activeRepo)}
-                className="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl px-4 py-3 text-sm font-medium transition-colors flex-shrink-0">
+              <button
+                onClick={() => sendMessage()}
+                disabled={loading || !input.trim() || (agentMode && !activeRepo)}
+                className="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl px-4 py-3 text-sm font-medium transition-colors flex-shrink-0"
+              >
                 {loading ? "…" : agentMode ? "Run" : "Send"}
               </button>
             </div>
