@@ -13,6 +13,11 @@ body {
   color: #e4e4e7;
 }
 
+/* Add viewport meta tag configuration */
+meta[name="viewport"] {
+  content: "width=device-width, initial-scale=1.0";
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }
