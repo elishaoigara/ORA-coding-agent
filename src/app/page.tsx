@@ -30,28 +30,28 @@ interface RoutingBadge { provider: string; model: string; reason: string; }
 type AgentPhase = "idle" | "planning" | "awaiting_approval" | "executing" | "done";
 
 export default function Home() {
-  const [messages, setMessages]       = useState<Message[]>([]);
+  const [messages, setMessages]           = useState<Message[]>([]);
   const [routingBadges, setRoutingBadges] = useState<Record<number, RoutingBadge>>({});
-  const [input, setInput]             = useState("");
-  const [loading, setLoading]         = useState(false);
+  const [input, setInput]                 = useState("");
+  const [loading, setLoading]             = useState(false);
   const [injectedFiles, setInjectedFiles] = useState<InjectedFile[]>([]);
-  const [activeRepo, setActiveRepo]   = useState("");
-  const [providers, setProviders]     = useState<PublicProvider[]>([]);
+  const [activeRepo, setActiveRepo]       = useState("");
+  const [providers, setProviders]         = useState<PublicProvider[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState("auto");
   const [selectedModel, setSelectedModel] = useState("");
-  const [password]                    = useState("local");
-  const [showHistory, setShowHistory] = useState(true);
-  const [showGitHub, setShowGitHub]   = useState(false);
-  const [projectInput, setProjectInput] = useState("");
+  const [password]                        = useState("local");
+  const [showHistory, setShowHistory]     = useState(true);
+  const [showGitHub, setShowGitHub]       = useState(false);
+  const [projectInput, setProjectInput]   = useState("");
   const [editingProject, setEditingProject] = useState(false);
 
   // Agent state
-  const [agentMode, setAgentMode]     = useState(false);
-  const [agentPhase, setAgentPhase]   = useState<AgentPhase>("idle");
-  const [agentStatus, setAgentStatus] = useState("");
-  const [currentPlan, setCurrentPlan] = useState<AgentPlan | null>(null);
-  const [currentTask, setCurrentTask] = useState("");
-  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
+  const [agentMode, setAgentMode]         = useState(false);
+  const [agentPhase, setAgentPhase]       = useState<AgentPhase>("idle");
+  const [agentStatus, setAgentStatus]     = useState("");
+  const [currentPlan, setCurrentPlan]     = useState<AgentPlan | null>(null);
+  const [currentTask, setCurrentTask]     = useState("");
+  const [stagedFiles, setStagedFiles]     = useState<StagedFile[]>([]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -62,7 +62,9 @@ export default function Home() {
   } = useConversations();
 
   useEffect(() => {
-    fetch("/api/provider").then((r) => r.json()).then((data: PublicProvider[]) => setProviders(data));
+    fetch("/api/provider")
+      .then((r) => r.json())
+      .then((data: PublicProvider[]) => setProviders(data));
   }, []);
 
   useEffect(() => {
@@ -93,8 +95,8 @@ export default function Home() {
     if (p) setSelectedModel(p.defaultModel);
   }
 
-  const isAuto = selectedProviderId === "auto";
-  const activeProvider = providers.find((p) => p.id === selectedProviderId);
+  const isAuto          = selectedProviderId === "auto";
+  const activeProvider  = providers.find((p) => p.id === selectedProviderId);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -118,7 +120,12 @@ export default function Home() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-app-password": password },
-        body: JSON.stringify({ messages: newMessages, model: selectedModel, provider: selectedProviderId, injectedFiles }),
+        body: JSON.stringify({
+          messages: newMessages,
+          model: selectedModel,
+          provider: selectedProviderId,
+          injectedFiles,
+        }),
       });
 
       if (!res.ok) {
@@ -134,15 +141,14 @@ export default function Home() {
         if (rp) setRoutingBadges((b) => ({ ...b, [assistantIndex]: { provider: rp, model: rm, reason: rr } }));
       }
 
-      const reader = res.body!.getReader();
+      const reader  = res.body!.getReader();
       const decoder = new TextDecoder();
-      let fullText = "";
+      let fullText  = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        for (const line of chunk.split("\n").filter((l) => l.startsWith("data: "))) {
+        for (const line of decoder.decode(value, { stream: true }).split("\n").filter((l) => l.startsWith("data: "))) {
           const data = line.slice(6);
           if (data === "[DONE]") continue;
           try {
@@ -155,8 +161,10 @@ export default function Home() {
 
       const ghCtx: GitHubContext | undefined = activeRepo && injectedFiles.length
         ? { repo: activeRepo, files: injectedFiles, pinnedAt: Date.now() } : undefined;
-      saveConversation([...newMessages, { role: "assistant", content: fullText }],
-        selectedProviderId, selectedModel, active?.project ?? projectInput, ghCtx);
+      saveConversation(
+        [...newMessages, { role: "assistant", content: fullText }],
+        selectedProviderId, selectedModel, active?.project ?? projectInput, ghCtx
+      );
     } catch (e) {
       setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `Network error: ${(e as Error).message}` }]);
     } finally {
@@ -164,7 +172,7 @@ export default function Home() {
     }
   }
 
-  // ── Shared agent SSE reader ──────────────────────────────────────────────────
+  // ── Shared SSE stream reader for agent ───────────────────────────────────────
   async function runAgentStream(
     phase: "plan" | "execute",
     task: string,
@@ -179,7 +187,8 @@ export default function Home() {
         phase,
         plan,
         provider: isAuto ? "qwen" : selectedProviderId,
-        model: isAuto ? "qwen3-coder-plus"
+        model: isAuto
+          ? "qwen3-coder-plus"
           : selectedModel === "deepseek-reasoner" ? "deepseek-chat" : selectedModel,
       }),
     });
@@ -191,16 +200,16 @@ export default function Home() {
 
     const reader  = res.body!.getReader();
     const decoder = new TextDecoder();
-    let agentText = "";
+    let agentText   = "";
     let parsedPlan: AgentPlan | undefined;
     const staged: StagedFile[] = [];
+    let receivedDone = false;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      for (const line of chunk.split("\n").filter((l) => l.startsWith("data: "))) {
+      for (const line of decoder.decode(value, { stream: true }).split("\n").filter((l) => l.startsWith("data: "))) {
         try {
           const event = JSON.parse(line.slice(6));
 
@@ -218,8 +227,13 @@ export default function Home() {
           }
 
           if (event.type === "staged") {
-            staged.push(...(event.files ?? []));
-            setStagedFiles((s) => [...s, ...(event.files ?? [])]);
+            const incoming: StagedFile[] = event.files ?? [];
+            staged.push(...incoming);
+            setStagedFiles((s) => {
+              const existing = new Set(s.map((f) => f.path));
+              const newOnes  = incoming.filter((f) => !existing.has(f.path));
+              return newOnes.length > 0 ? [...s, ...newOnes] : s;
+            });
           }
 
           if (event.type === "error") {
@@ -229,23 +243,50 @@ export default function Home() {
           }
 
           if (event.type === "done") {
+            receivedDone = true;
             setAgentStatus("");
-            // Final safety net for blank assistant message
-            setMessages((m) => {
-              const last = m[m.length - 1];
-              if (last?.role === "assistant" && !last.content.trim()) {
-                const fallback = phase === "plan"
-                  ? "Analysis complete. See the plan below."
-                  : staged.length > 0
-                    ? "Execution complete. Review the staged changes below and push when ready."
-                    : "⚠️ Execution finished but no files were staged. Try re-running or switch to Qwen3 Max.";
-                agentText = fallback;
-                return [...m.slice(0, -1), { role: "assistant", content: fallback }];
-              }
-              return m;
-            });
+            // Safety net: if message bubble is still empty after all events
+            if (!agentText.trim()) {
+              const fallback = phase === "plan"
+                ? "Analysis complete. See the plan below."
+                : staged.length > 0
+                  ? "Execution complete. Review the staged changes below and push when ready."
+                  : "⚠️ Agent finished but staged no files. Try switching to DeepSeek V3 or re-run the task.";
+              agentText = fallback;
+              setMessages((m) => {
+                const last = m[m.length - 1];
+                if (last?.role === "assistant" && !last.content.trim()) {
+                  return [...m.slice(0, -1), { role: "assistant", content: fallback }];
+                }
+                return m;
+              });
+            }
           }
-        } catch { /* incomplete JSON */ }
+        } catch { /* incomplete JSON chunk */ }
+      }
+    }
+
+    // FIX: Handle stream ending without a `done` event (Vercel timeout, network cut)
+    // This is why the message bubble was blank — the stream was cut before sending `done`
+    if (!receivedDone) {
+      setAgentStatus("");
+      const fallback = agentText.trim()
+        ? agentText
+        : phase === "execute" && staged.length > 0
+          ? "Execution complete. Review the staged changes below."
+          : phase === "execute"
+            ? "⚠️ The request timed out mid-execution. Check if any files were staged below, or try a smaller task."
+            : "Analysis complete. See the plan below.";
+
+      if (!agentText.trim()) {
+        agentText = fallback;
+        setMessages((m) => {
+          const last = m[m.length - 1];
+          if (last?.role === "assistant" && !last.content.trim()) {
+            return [...m.slice(0, -1), { role: "assistant", content: fallback }];
+          }
+          return m;
+        });
       }
     }
 
@@ -295,46 +336,33 @@ export default function Home() {
     }
   }
 
-  // ── Phase 2: Execute (called when user approves plan) ────────────────────────
+  // ── Phase 2: Execute ─────────────────────────────────────────────────────────
   async function executePlan(approvedPlan: AgentPlan) {
     setAgentPhase("executing");
     setLoading(true);
     setStagedFiles([]);
-    // FIX: clear the plan panel immediately so the UI doesn't go blank —
-    // the plan card disappears and the executing status bar takes over.
-    setCurrentPlan(null);
+    setCurrentPlan(null); // hide plan panel immediately
 
-    const approvalMsg: Message = {
-      role: "user",
-      content: "✓ Plan approved — execute it now.",
-    };
-    const newMessages = [...messages, approvalMsg];
+    const taskSnapshot   = currentTask;
+    const approvalMsg: Message = { role: "user", content: "✓ Plan approved — execute it now." };
+    const newMessages    = [...messages, approvalMsg];
     setMessages(newMessages);
     setMessages((m) => [...m, { role: "assistant", content: "" }]);
-
-    // Snapshot task now — currentTask is a closure over React state and is safe here,
-    // but capturing it explicitly makes the intent clear and avoids stale-closure risk.
-    const taskSnapshot = currentTask;
 
     try {
       const { agentText, staged } = await runAgentStream("execute", taskSnapshot, approvedPlan);
 
-      // FIX: set phase to "done" so StagedChanges panel renders.
-      // Previously this was correct but currentPlan was cleared in finally AFTER
-      // setAgentPhase("done"), meaning the plan panel would flicker back briefly.
-      // Now currentPlan is cleared above before execution starts.
       setAgentPhase("done");
+
+      // Safety net: ensure staged files are set even if SSE race condition occurred
+      if (staged.length > 0) {
+        setStagedFiles((existing) => existing.length > 0 ? existing : staged);
+      }
 
       saveConversation(
         [...newMessages, { role: "assistant", content: agentText }],
         selectedProviderId, selectedModel, active?.project ?? projectInput
       );
-
-      // If somehow staged files came back from the stream but setStagedFiles
-      // inside runAgentStream didn't fire (race condition), set them here as a safety net.
-      if (staged.length > 0) {
-        setStagedFiles((existing) => existing.length > 0 ? existing : staged);
-      }
     } catch (e) {
       setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `❌ ${(e as Error).message}` }]);
       setAgentPhase("idle");
@@ -347,9 +375,8 @@ export default function Home() {
   function rejectPlan() {
     setCurrentPlan(null);
     setAgentPhase("idle");
-    setMessages((m) => [
-      ...m,
-      { role: "assistant", content: "Plan rejected. Describe what you'd like to change about the approach and I'll re-plan." },
+    setMessages((m) => [...m,
+      { role: "assistant", content: "Plan rejected. Describe what you'd like to change and I'll re-plan." },
     ]);
   }
 
@@ -382,58 +409,93 @@ export default function Home() {
 
   function handleProjectSave() { setProject(projectInput); setEditingProject(false); }
 
-  const isAgentBusy = agentPhase === "planning" || agentPhase === "executing";
+  const isAgentBusy     = agentPhase === "planning" || agentPhase === "executing";
+  const inputDisabled   = loading || (agentMode && !activeRepo) || agentPhase === "awaiting_approval";
+
+  // Show staged changes whenever there are staged files and we're not in the middle of awaiting approval
+  const showStagedChanges = stagedFiles.length > 0 && agentPhase !== "awaiting_approval";
 
   return (
     <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden">
+      {/* Header */}
       <header className="border-b border-zinc-800 px-4 py-2.5 flex items-center gap-3 flex-shrink-0 bg-zinc-950">
         <button onClick={() => setShowHistory((s) => !s)} className="text-zinc-500 hover:text-zinc-200 text-xs">🕐</button>
-        <span className="text-teal-400 font-mono font-bold tracking-tight">code<span className="text-zinc-400">agent</span></span>
+        <span className="text-teal-400 font-mono font-bold tracking-tight">
+          code<span className="text-zinc-400">agent</span>
+        </span>
 
+        {/* Project tag */}
         <div className="flex items-center gap-1">
           {editingProject ? (
-            <input value={projectInput} onChange={(e) => setProjectInput(e.target.value)}
+            <input
+              value={projectInput}
+              onChange={(e) => setProjectInput(e.target.value)}
               onBlur={handleProjectSave}
               onKeyDown={(e) => { if (e.key === "Enter") handleProjectSave(); if (e.key === "Escape") setEditingProject(false); }}
               placeholder="Project name…"
-              className="bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-zinc-300 text-xs w-32 focus:outline-none focus:border-teal-600" autoFocus />
+              className="bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-zinc-300 text-xs w-32 focus:outline-none focus:border-teal-600"
+              autoFocus
+            />
           ) : (
-            <button onClick={() => setEditingProject(true)} className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 hover:border-zinc-600 rounded px-2 py-0.5 transition-colors">
+            <button
+              onClick={() => setEditingProject(true)}
+              className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 hover:border-zinc-600 rounded px-2 py-0.5 transition-colors"
+            >
               {active?.project || projectInput || "＋ project"}
             </button>
           )}
         </div>
 
+        {/* Mode toggle */}
         <div className="flex items-center bg-zinc-800 border border-zinc-700 rounded-lg p-0.5 gap-0.5">
-          <button onClick={() => { setAgentMode(false); setCurrentPlan(null); setAgentPhase("idle"); }}
-            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${!agentMode ? "bg-zinc-600 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}>
+          <button
+            onClick={() => { setAgentMode(false); setCurrentPlan(null); setAgentPhase("idle"); }}
+            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${!agentMode ? "bg-zinc-600 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
+          >
             Chat
           </button>
-          <button onClick={() => setAgentMode(true)}
-            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${agentMode ? "bg-teal-800 text-teal-100" : "text-zinc-500 hover:text-zinc-300"}`}>
+          <button
+            onClick={() => setAgentMode(true)}
+            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${agentMode ? "bg-teal-800 text-teal-100" : "text-zinc-500 hover:text-zinc-300"}`}
+          >
             ⚡ Agent
           </button>
         </div>
 
+        {/* Provider + model */}
         <div className="flex items-center gap-2">
-          <select value={selectedProviderId} onChange={(e) => handleProviderChange(e.target.value)}
-            className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600">
+          <select
+            value={selectedProviderId}
+            onChange={(e) => handleProviderChange(e.target.value)}
+            className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600"
+          >
             <option value="auto">⚡ Auto</option>
             <option disabled>──────────</option>
             {providers.map((p) => (
-              <option key={p.id} value={p.id} disabled={!p.configured}>{p.name}{!p.configured ? " (no key)" : ""}</option>
+              <option key={p.id} value={p.id} disabled={!p.configured}>
+                {p.name}{!p.configured ? " (no key)" : ""}
+              </option>
             ))}
           </select>
           {!isAuto && activeProvider && (
             <>
               <span className="text-zinc-700 text-xs">/</span>
-              <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}
-                className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600">
-                {activeProvider.models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600"
+              >
+                {activeProvider.models.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
               </select>
             </>
           )}
-          {isAuto && <span className="text-xs text-amber-400 bg-amber-950 border border-amber-800 rounded-full px-2 py-0.5">picks best model</span>}
+          {isAuto && (
+            <span className="text-xs text-amber-400 bg-amber-950 border border-amber-800 rounded-full px-2 py-0.5">
+              picks best model
+            </span>
+          )}
         </div>
 
         <div className="ml-auto flex items-center gap-3">
@@ -447,41 +509,57 @@ export default function Home() {
               📌 {injectedFiles.length} file{injectedFiles.length > 1 ? "s" : ""}
             </span>
           )}
-          <button onClick={() => setShowGitHub((s) => !s)}
-            className={`text-xs transition-colors ${showGitHub ? "text-teal-400" : "text-zinc-500 hover:text-zinc-300"}`}>
+          <button
+            onClick={() => setShowGitHub((s) => !s)}
+            className={`text-xs transition-colors ${showGitHub ? "text-teal-400" : "text-zinc-500 hover:text-zinc-300"}`}
+          >
             GitHub
           </button>
         </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden">
+        {/* History sidebar */}
         {showHistory && (
           <div className="w-60 border-r border-zinc-800 flex flex-col bg-zinc-950 flex-shrink-0">
-            <div className="px-3 py-2 border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">History</div>
-            <ConversationList conversations={conversations} activeId={activeId}
-              onSelect={loadConversation} onNew={handleNewChat} onDelete={deleteConversation} />
+            <div className="px-3 py-2 border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
+              History
+            </div>
+            <ConversationList
+              conversations={conversations}
+              activeId={activeId}
+              onSelect={loadConversation}
+              onNew={handleNewChat}
+              onDelete={deleteConversation}
+            />
           </div>
         )}
 
-        {showGitHub && <GitHubSidebar onFilesChange={handleFilesChange} savedContext={active?.githubContext} />}
+        {showGitHub && (
+          <GitHubSidebar
+            onFilesChange={handleFilesChange}
+            savedContext={active?.githubContext}
+          />
+        )}
 
         <main className="flex-1 flex flex-col overflow-hidden">
-          {/* Agent status bar — shown while planning or executing */}
+          {/* Agent status bar */}
           {agentStatus && (
             <div className="px-4 py-2 bg-amber-950 border-b border-amber-900 flex items-center gap-2 flex-shrink-0">
               <span className="animate-spin text-amber-400 text-xs inline-block">⟳</span>
-              <span className="text-amber-300 text-xs">{agentStatus}</span>
+              <span className="text-amber-300 text-xs font-mono">{agentStatus}</span>
             </div>
           )}
 
-          {/* Executing indicator — shown when agentStatus is blank mid-execution */}
+          {/* Executing indicator when status bar is empty but still executing */}
           {agentPhase === "executing" && !agentStatus && (
             <div className="px-4 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center gap-2 flex-shrink-0">
-              <span className="animate-spin text-teal-400 text-xs inline-block">⟳</span>
-              <span className="text-zinc-400 text-xs">Executing plan — writing files…</span>
+              <span className="animate-spin text-zinc-500 text-xs inline-block">⟳</span>
+              <span className="text-zinc-500 text-xs">Writing files…</span>
             </div>
           )}
 
+          {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
             {messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center gap-6 text-center">
@@ -493,15 +571,18 @@ export default function Home() {
                   <p className="text-zinc-500 text-sm mt-1 max-w-sm">
                     {agentMode
                       ? activeRepo
-                        ? `Give a task. Agent reads your codebase → shows a plan → you approve → it writes the code → you review diffs → push to GitHub.`
+                        ? `Agent reads your codebase → shows plan → you approve → writes code → you review diffs → push to GitHub.`
                         : "Open the GitHub sidebar and select a repo first."
-                      : "Chats are saved automatically. Switch to Agent mode to autonomously edit your repo."}
+                      : "Chats auto-save. Switch to Agent mode to autonomously edit your repo."}
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 max-w-lg w-full">
                   {(agentMode ? AGENT_PROMPTS : QUICK_PROMPTS).map((p) => (
-                    <button key={p} onClick={() => sendMessage(p)}
-                      className="text-left text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 hover:border-zinc-600 hover:text-zinc-200 transition-colors">
+                    <button
+                      key={p}
+                      onClick={() => sendMessage(p)}
+                      className="text-left text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 hover:border-zinc-600 hover:text-zinc-200 transition-colors"
+                    >
                       {p}
                     </button>
                   ))}
@@ -532,7 +613,7 @@ export default function Home() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Plan approval panel — shown after planning phase */}
+          {/* Plan approval — shown after planning phase completes */}
           {agentPhase === "awaiting_approval" && currentPlan && (
             <PlanApproval
               plan={currentPlan}
@@ -543,8 +624,8 @@ export default function Home() {
             />
           )}
 
-          {/* Staged changes panel — shown after execution completes with files */}
-          {stagedFiles.length > 0 && agentPhase !== "awaiting_approval" && agentPhase !== "executing" && (
+          {/* Staged changes — shown whenever files are staged (regardless of phase) */}
+          {showStagedChanges && (
             <StagedChanges
               files={stagedFiles}
               repo={activeRepo}
@@ -553,6 +634,7 @@ export default function Home() {
             />
           )}
 
+          {/* Input */}
           <div className="border-t border-zinc-800 px-4 py-3 flex-shrink-0 bg-zinc-950">
             {agentMode && !activeRepo && (
               <p className="text-amber-500 text-xs mb-2 text-center">
@@ -565,16 +647,17 @@ export default function Home() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={
-                  agentMode
-                    ? agentPhase === "awaiting_approval"
-                      ? "Approve or reject the plan above first…"
-                      : activeRepo
-                      ? `Describe a task for ${activeRepo.split("/")[1]}…`
-                      : "Select a repo first…"
-                    : isAuto ? "Ask anything — Auto picks the best model…"
+                  agentPhase === "awaiting_approval"
+                    ? "Approve or reject the plan above first…"
+                    : agentMode && activeRepo
+                    ? `Describe a task for ${activeRepo.split("/")[1]}…`
+                    : agentMode
+                    ? "Select a repo first…"
+                    : isAuto
+                    ? "Ask anything — Auto picks the best model…"
                     : "Ask the coding agent… (Shift+Enter for newline)"
                 }
-                disabled={isAgentBusy || agentPhase === "awaiting_approval"}
+                disabled={inputDisabled}
                 rows={2}
                 className={`flex-1 bg-zinc-800 border rounded-xl px-4 py-3 text-zinc-100 text-sm resize-none focus:outline-none placeholder:text-zinc-600 disabled:opacity-50 ${
                   agentMode ? "border-teal-800 focus:border-teal-600" : "border-zinc-700 focus:border-teal-600"
@@ -582,7 +665,7 @@ export default function Home() {
               />
               <button
                 onClick={() => sendMessage()}
-                disabled={loading || !input.trim() || (agentMode && !activeRepo) || agentPhase === "awaiting_approval"}
+                disabled={inputDisabled || !input.trim() || isAgentBusy}
                 className="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl px-4 py-3 text-sm font-medium transition-colors flex-shrink-0"
               >
                 {loading ? "…" : agentMode ? "Run" : "Send"}
