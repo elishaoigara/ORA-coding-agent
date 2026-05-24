@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProvider } from "@/lib/providers";
 import { AGENT_TOOLS, type StagedFile } from "@/lib/agentTools";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const GH_BASE = "https://api.github.com";
-const MAX_ITERATIONS = 15;
+const MAX_ITERATIONS = 40;
+const MAX_TOKENS     = 16000;
 
 // ── Phase 1: Plan ─────────────────────────────────────────────────────────────
 const PLAN_SYSTEM_PROMPT = `You are a senior software engineer analyzing a codebase to plan changes.
@@ -64,12 +65,14 @@ Changes to make:
 ${changesList}
 
 EXECUTION RULES:
-- NEVER ask questions. Execute immediately.
-- For every file marked "modify": call read_file first, then stage_file with the complete updated content
-- For every file marked "create": call stage_file with the complete new file content
-- Write FULL file content — never truncate, never use "..." placeholders
+- NEVER ask questions or say "I'll do X" — just DO it immediately with tool calls
+- NEVER truncate code — write COMPLETE file contents, every single line
+- NEVER use "..." or "// rest of file" placeholders — the full file must be written
+- For every file marked "modify": call read_file first, then stage_file with complete updated content
+- For every file marked "create": call stage_file with complete new file content
+- Write FULL file content — if a file is 500 lines, write all 500 lines
 - Follow the existing code style exactly
-- After staging all files, write a brief summary confirming what was done`;
+- After ALL files are staged, write a brief summary of what was done`;
 }
 
 // ── Tool helpers ──────────────────────────────────────────────────────────────
@@ -141,9 +144,22 @@ async function executeTool(
         if (data.content) originalContent = Buffer.from(data.content, "base64").toString("utf-8");
       }
 
+      const content = args.content ?? "";
+      if (
+        content.trim().endsWith("...") ||
+        content.includes("// ... rest") ||
+        content.includes("// ...rest") ||
+        content.includes("/* ... */") ||
+        content.includes("# ... rest")
+      ) {
+        return JSON.stringify({
+          error: "TRUNCATED CONTENT DETECTED. You must write the COMPLETE file. Never use '...' placeholders.",
+        });
+      }
+
       const staged: StagedFile = {
         path: args.path,
-        content: args.content,
+        content,
         originalContent,
         description: args.description,
       };
@@ -156,7 +172,7 @@ async function executeTool(
         success: true,
         path: args.path,
         status: originalContent !== null ? "modified" : "new file",
-        lines: args.content.split("\n").length,
+        lines: content.split("\n").length,
       });
     }
 
@@ -189,25 +205,21 @@ export interface AgentPlan {
   }[];
 }
 
-// ── Determine if this provider needs Qwen-specific request params ─────────────
 function isQwenProvider(baseUrl: string): boolean {
   return baseUrl.includes("dashscope") || baseUrl.includes("aliyun");
 }
 
-// ── Build the fetch headers — skip anthropic-version for non-Anthropic ─────────
 function llmHeaders(apiKey: string, baseUrl: string): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${apiKey}`,
   };
-  // Only send anthropic-version to Anthropic's own API
   if (baseUrl.includes("anthropic.com")) {
     headers["anthropic-version"] = "2023-06-01";
   }
   return headers;
 }
 
-// ── Build the request body, adding Qwen-specific params when needed ────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildRequestBody(params: {
   model: string;
@@ -222,13 +234,11 @@ function buildRequestBody(params: {
     messages: params.messages,
     tools: params.tools,
     tool_choice: "auto",
-    max_tokens: 4096,
+    max_tokens: MAX_TOKENS,
     temperature: 0.2,
     stream: false,
   };
 
-  // Qwen3 models have "thinking" mode enabled by default which breaks
-  // structured tool calling. Must explicitly disable it.
   if (isQwenProvider(params.baseUrl)) {
     body.enable_thinking = false;
   }
@@ -268,7 +278,6 @@ export async function POST(req: NextRequest) {
   const agentModel =
     model === "deepseek-reasoner" ? "deepseek-chat" : model || provider.defaultModel;
 
-  // In plan phase only allow read tools
   const planTools = AGENT_TOOLS.filter((t) =>
     ["read_file", "list_files", "search_files"].includes(
       (t as { function: { name: string } }).function.name
@@ -297,6 +306,7 @@ export async function POST(req: NextRequest) {
 
       let iterations = 0;
       let textWasSent = false;
+      let consecutiveEmptyResponses = 0;
 
       while (iterations < MAX_ITERATIONS) {
         iterations++;
@@ -336,11 +346,19 @@ export async function POST(req: NextRequest) {
         const assistantMsg = choice.message;
         messages.push(assistantMsg);
 
+        // ── Detect finish_reason=length (truncation) ───────────────────────
+        if (choice.finish_reason === "length") {
+          send("progress", { text: "⚠️ Response was cut off — continuing…" });
+          messages.push({
+            role: "user",
+            content: "Your last response was cut off. Continue exactly where you left off — complete all remaining tool calls and file changes.",
+          });
+          continue;
+        }
+
         // ── Tool calls ──────────────────────────────────────────────────────
-        // KEY FIX: Check tool_calls on the message directly — do NOT rely on
-        // finish_reason alone. Qwen3 returns finish_reason "stop" even when
-        // tool_calls are present, which caused the agent to skip all tool use.
         if (assistantMsg.tool_calls?.length) {
+          consecutiveEmptyResponses = 0;
           for (const toolCall of assistantMsg.tool_calls) {
             const toolName = toolCall.function?.name ?? "unknown";
             let args: Record<string, string> = {};
@@ -357,11 +375,18 @@ export async function POST(req: NextRequest) {
             const result = await executeTool(toolName, args, repo, stagedFiles);
             messages.push({ role: "tool", tool_call_id: toolCall.id, content: result });
           }
-          continue; // loop back to call LLM again with tool results
+          continue;
         }
 
         // ── Final text response ─────────────────────────────────────────────
         const rawText: string = (assistantMsg.content ?? "").trim();
+
+        if (!rawText) {
+          consecutiveEmptyResponses++;
+          if (consecutiveEmptyResponses >= 2) break;
+          continue;
+        }
+        consecutiveEmptyResponses = 0;
 
         if (phase === "plan") {
           const planMatch = rawText.match(/<PLAN>([\s\S]*?)<\/PLAN>/);
@@ -380,10 +405,28 @@ export async function POST(req: NextRequest) {
               send("plan_error", { text: "Could not parse structured plan. See analysis above." });
             }
           } else {
-            send("plan_error", { text: "Agent did not produce a structured plan. See analysis above." });
+            messages.push({
+              role: "user",
+              content: "You forgot to include the <PLAN> JSON block. Please output ONLY the <PLAN>...</PLAN> block now, nothing else.",
+            });
+            continue;
           }
         } else {
-          // Execute phase
+          // Execute phase — check all planned files were staged
+          const missingPaths = plan?.changes
+            .filter((c) => c.action !== "delete" && !stagedFiles.some((f) => f.path === c.path))
+            .map((c) => `- ${c.path}`)
+            .join("\n");
+
+          if (missingPaths && iterations < MAX_ITERATIONS) {
+            send("progress", { text: "Still staging remaining files…" });
+            messages.push({
+              role: "user",
+              content: `You haven't staged all planned files yet. Still missing:\n${missingPaths}\n\nContinue — stage these files now.`,
+            });
+            continue;
+          }
+
           if (rawText) {
             await streamText(rawText, send);
             textWasSent = true;
@@ -393,7 +436,6 @@ export async function POST(req: NextRequest) {
         break;
       }
 
-      // ── Fallback message if agent produced no text ──────────────────────
       if (!textWasSent) {
         if (phase === "execute" && stagedFiles.length > 0) {
           const summary = [
@@ -416,7 +458,6 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // ── Emit staged files event ─────────────────────────────────────────
       if (phase === "execute" && stagedFiles.length > 0) {
         send("staged", { files: stagedFiles });
       }

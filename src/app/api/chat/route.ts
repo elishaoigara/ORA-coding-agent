@@ -22,6 +22,22 @@ function buildContextBlock(files: InjectedFile[]): string {
   return `<context>\n${parts.join("\n\n")}\n</context>\n\n`;
 }
 
+function buildHeaders(apiKey: string, baseUrl: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+  };
+  // Only send anthropic-version to Anthropic — other providers reject it
+  if (baseUrl.includes("anthropic.com")) {
+    headers["anthropic-version"] = "2023-06-01";
+  }
+  return headers;
+}
+
+function isQwenProvider(baseUrl: string): boolean {
+  return baseUrl.includes("dashscope") || baseUrl.includes("aliyun");
+}
+
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("x-app-password");
   if (
@@ -73,15 +89,16 @@ export async function POST(req: NextRequest) {
   });
 
   const maxTokensMap: Record<string, number> = {
-    groq: 32768,
-    deepseek: 8192,
-    openai: 16384,
+    groq:      32768,
+    deepseek:  16000,
+    openai:    16384,
     anthropic: 16000,
-    qwen: 8192,
+    qwen:      16000,
   };
-  const maxTokens = maxTokensMap[resolvedProviderId] ?? 8192;
+  const maxTokens = maxTokensMap[resolvedProviderId ?? ""] ?? 16000;
 
-  const payload = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const payload: Record<string, any> = {
     model: resolvedModel || provider.defaultModel,
     messages: [{ role: "system", content: SYSTEM_PROMPT }, ...enrichedMessages],
     stream: true,
@@ -89,14 +106,15 @@ export async function POST(req: NextRequest) {
     temperature: 0.2,
   };
 
+  // Qwen3 thinking mode causes malformed streaming chunks — disable it
+  if (isQwenProvider(provider.baseUrl)) {
+    payload.enable_thinking = false;
+  }
+
   try {
     const upstream = await fetch(`${provider.baseUrl}/chat/completions`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${provider.apiKey}`,
-        "anthropic-version": "2023-06-01",
-      },
+      headers: buildHeaders(provider.apiKey, provider.baseUrl),
       body: JSON.stringify(payload),
     });
 
@@ -113,7 +131,7 @@ export async function POST(req: NextRequest) {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
-        "X-Routed-Provider": resolvedProviderId,
+        "X-Routed-Provider": resolvedProviderId ?? "",
         "X-Routed-Model": resolvedModel || provider.defaultModel,
         "X-Route-Reason": routeReason,
       },
