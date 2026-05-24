@@ -72,7 +72,7 @@ EXECUTION RULES:
 - For every file marked "create": call stage_file with complete new file content
 - Write FULL file content — if a file is 500 lines, write all 500 lines
 - Follow the existing code style exactly
-- After ALL files are staged, call stage_file for the last file then write a brief summary`;
+- After ALL files are staged with stage_file, stop calling tools and write a SHORT plain-text summary of every file you changed`;
 }
 
 // ── Tool helpers ──────────────────────────────────────────────────────────────
@@ -233,12 +233,15 @@ function buildRequestBody(params: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tools: any[];
   baseUrl: string;
+  forceText?: boolean;
 }) {
   const body: Record<string, unknown> = {
     model: params.model,
     messages: params.messages,
     tools: params.tools,
-    tool_choice: "auto",
+    // "none" forces a plain-text response (no more tool calls) — passed in when
+    // all files are already staged so the model just writes the final summary.
+    tool_choice: params.forceText ? "none" : "auto",
     max_tokens: MAX_TOKENS,
     temperature: 0.2,
     stream: false,
@@ -296,6 +299,14 @@ export async function POST(req: NextRequest) {
   const stagedFiles: StagedFile[] = resumeStagedFiles ? [...resumeStagedFiles] : [];
   const encoder = new TextEncoder();
 
+  /** Returns true when every non-delete change in the plan has been staged */
+  function allFilesStaged(): boolean {
+    if (!plan) return false;
+    return plan.changes
+      .filter((c) => c.action !== "delete")
+      .every((c) => stagedFiles.some((f) => f.path === c.path));
+  }
+
   const stream = new ReadableStream({
     async start(controller) {
       function send(type: string, payload: Record<string, unknown> = {}) {
@@ -325,6 +336,10 @@ export async function POST(req: NextRequest) {
 
         let llmResponse;
         try {
+          // When every planned file is already staged, force a text-only response
+          // so the model writes the summary instead of calling more tools.
+          const forceText = phase === "execute" && allFilesStaged();
+
           const res = await fetch(`${provider.baseUrl}/chat/completions`, {
             method: "POST",
             headers: llmHeaders(provider.apiKey, provider.baseUrl),
@@ -334,12 +349,58 @@ export async function POST(req: NextRequest) {
                 messages: [{ role: "system", content: systemPrompt }, ...messages],
                 tools: activeTools,
                 baseUrl: provider.baseUrl,
+                forceText,
               })
             ),
           });
 
           if (!res.ok) {
             const errText = await res.text();
+
+            // ── Groq/LLaMA XML tool-call fallback ──────────────────────────
+            // LLaMA models on Groq sometimes emit tool calls in the old XML
+            // format: <function=tool_name>{"arg":"val"}</function>
+            // Groq rejects these with 400 tool_use_failed. Parse and execute
+            // them ourselves so the agent loop continues uninterrupted.
+            try {
+              const errJson = JSON.parse(errText);
+              if (errJson.error?.code === "tool_use_failed") {
+                const failedGen: string = errJson.error?.failed_generation ?? "";
+                const xmlRe = /<function=(\w+)>([\s\S]*?)<\/function>/g;
+                let xmlMatch: RegExpExecArray | null;
+                let recovered = false;
+                const syntheticToolCalls: {id: string; type: string; function: {name: string; arguments: string}}[] = [];
+                const toolResults: {id: string; content: string}[] = [];
+
+                while ((xmlMatch = xmlRe.exec(failedGen)) !== null) {
+                  const toolName = xmlMatch[1];
+                  const rawArgs  = xmlMatch[2].trim();
+                  let args: Record<string, string> = {};
+                  try { args = JSON.parse(rawArgs || "{}"); } catch { /* no args */ }
+
+                  const syntheticId = `xmlcall_${Date.now()}_${syntheticToolCalls.length}`;
+                  send("tool_call", { text: `↩ Retrying \`${toolName}\` (XML→JSON fix)…` });
+
+                  const result = await executeTool(toolName, args, repo, stagedFiles);
+                  syntheticToolCalls.push({
+                    id: syntheticId, type: "function",
+                    function: { name: toolName, arguments: JSON.stringify(args) },
+                  });
+                  toolResults.push({ id: syntheticId, content: result });
+                  recovered = true;
+                }
+
+                if (recovered) {
+                  messages.push({ role: "assistant", content: null, tool_calls: syntheticToolCalls });
+                  for (const tr of toolResults) {
+                    messages.push({ role: "tool", tool_call_id: tr.id, content: tr.content });
+                  }
+                  continue;
+                }
+              }
+            } catch { /* not JSON or no failed_generation — fall through */ }
+            // ── End Groq XML fallback ───────────────────────────────────────
+
             send("error", { text: `LLM error (${res.status}): ${errText.slice(0, 500)}` });
             break;
           }
@@ -369,12 +430,19 @@ export async function POST(req: NextRequest) {
         }
 
         // ── Tool calls ──────────────────────────────────────────────────────
-        if (assistantMsg.tool_calls?.length) {
+        // Guard: some providers (Groq) return tool_calls:[] (empty) on failure —
+        // treat that the same as no tool calls to avoid misfire.
+        const hasToolCalls = Array.isArray(assistantMsg.tool_calls) && assistantMsg.tool_calls.length > 0;
+
+        if (hasToolCalls) {
           consecutiveEmptyResponses = 0;
           for (const toolCall of assistantMsg.tool_calls) {
             const toolName = toolCall.function?.name ?? "unknown";
+            // Groq sometimes omits the id field — generate a fallback so the
+            // tool result message is always well-formed.
+            const toolId = toolCall.id ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
             let args: Record<string, string> = {};
-            try { args = JSON.parse(toolCall.function.arguments ?? "{}"); } catch { /* empty */ }
+            try { args = JSON.parse(toolCall.function?.arguments ?? "{}"); } catch { /* empty */ }
 
             const labels: Record<string, string> = {
               read_file:    `Reading \`${args.path}\`…`,
@@ -385,7 +453,9 @@ export async function POST(req: NextRequest) {
             send("tool_call", { text: labels[toolName] ?? `Calling ${toolName}…` });
 
             const result = await executeTool(toolName, args, repo, stagedFiles);
-            messages.push({ role: "tool", tool_call_id: toolCall.id, content: result });
+            // Use the normalised toolId in both the assistant message and the tool result
+            toolCall.id = toolId;
+            messages.push({ role: "tool", tool_call_id: toolId, content: result });
           }
           continue;
         }
@@ -445,8 +515,19 @@ export async function POST(req: NextRequest) {
           // NOTE: do NOT gate on textWasSent — missing files always need continuation
           // regardless of whether the model wrote a partial summary.
           if (missingPaths) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const prunedMsgs = messages.map((m: any) => {
+              if (m.role !== "tool") return m;
+              try {
+                const p = JSON.parse(m.content ?? "{}");
+                if (typeof p.content === "string" && p.content.length > 500) {
+                  return { ...m, content: JSON.stringify({ ...p, content: `[pruned — ${p.lines ?? "?"} lines]` }) };
+                }
+              } catch { /**/ }
+              return m;
+            });
             send("continue", {
-              messages,
+              messages: prunedMsgs,
               stagedFiles,
               progress: `Staged ${stagedFiles.length} file(s) so far. Continuing…`,
             });
@@ -471,8 +552,24 @@ export async function POST(req: NextRequest) {
 
       // Always emit "continue" when files are still missing — do NOT gate on textWasSent
       if (phase === "execute" && missingAfterLoop) {
+        // Prune large read_file / stage_file tool results from the history so the
+        // continuation payload stays well under Vercel's 4 MB request body limit.
+        // We keep the skeleton (tool name + path) but drop the file content.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const prunedMessages = messages.map((m: any) => {
+          if (m.role !== "tool") return m;
+          try {
+            const parsed = JSON.parse(m.content ?? "{}");
+            // If the tool result contains file content, replace it with a size note
+            if (typeof parsed.content === "string" && parsed.content.length > 500) {
+              return { ...m, content: JSON.stringify({ ...parsed, content: `[pruned — ${parsed.lines ?? "?"} lines]` }) };
+            }
+          } catch { /* not JSON */ }
+          return m;
+        });
+
         send("continue", {
-          messages,
+          messages: prunedMessages,
           stagedFiles,
           progress: `Staged ${stagedFiles.length} file(s) so far. Continuing in next batch…`,
         });
