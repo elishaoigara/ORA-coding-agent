@@ -29,6 +29,13 @@ interface RoutingBadge { provider: string; model: string; reason: string; }
 
 type AgentPhase = "idle" | "planning" | "awaiting_approval" | "executing" | "done";
 
+// Shape of a "continue" event from the agent API
+interface ContinueEvent {
+  messages: unknown[];
+  stagedFiles: StagedFile[];
+  progress?: string;
+}
+
 export default function Home() {
   const [messages, setMessages]           = useState<Message[]>([]);
   const [routingBadges, setRoutingBadges] = useState<Record<number, RoutingBadge>>({});
@@ -95,8 +102,8 @@ export default function Home() {
     if (p) setSelectedModel(p.defaultModel);
   }
 
-  const isAuto          = selectedProviderId === "auto";
-  const activeProvider  = providers.find((p) => p.id === selectedProviderId);
+  const isAuto         = selectedProviderId === "auto";
+  const activeProvider = providers.find((p) => p.id === selectedProviderId);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -172,38 +179,22 @@ export default function Home() {
     }
   }
 
-  // ── Shared SSE stream reader for agent ───────────────────────────────────────
-  async function runAgentStream(
-    phase: "plan" | "execute",
-    task: string,
-    plan?: AgentPlan
-  ): Promise<{ agentText: string; plan?: AgentPlan; staged: StagedFile[] }> {
-    const res = await fetch("/api/agent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        task,
-        repo: activeRepo,
-        phase,
-        plan,
-        provider: isAuto ? "qwen" : selectedProviderId,
-        model: isAuto
-          ? "qwen3-coder-plus"
-          : selectedModel === "deepseek-reasoner" ? "deepseek-chat" : selectedModel,
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error ?? "Agent request failed");
-    }
-
+  // ── Core SSE stream reader ────────────────────────────────────────────────────
+  // Returns the text, plan, staged files, and any "continue" payload if the
+  // server hit its per-call iteration cap and wants the frontend to resume.
+  async function readAgentStream(res: Response): Promise<{
+    agentText: string;
+    plan?: AgentPlan;
+    staged: StagedFile[];
+    continuePayload?: ContinueEvent;
+  }> {
     const reader  = res.body!.getReader();
     const decoder = new TextDecoder();
-    let agentText   = "";
+    let agentText            = "";
     let parsedPlan: AgentPlan | undefined;
-    const staged: StagedFile[] = [];
-    let receivedDone = false;
+    const staged: StagedFile[]   = [];
+    let receivedDone         = false;
+    let continuePayload: ContinueEvent | undefined;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -242,16 +233,30 @@ export default function Home() {
             agentText = errMsg;
           }
 
+          // Server hit iteration cap — needs frontend to resume in a new request
+          if (event.type === "continue") {
+            continuePayload = {
+              messages:    event.messages   ?? [],
+              stagedFiles: event.stagedFiles ?? [],
+              progress:    event.progress,
+            };
+            // Merge any already-staged files into the continue payload
+            if (staged.length > 0) {
+              const existing = new Set(continuePayload.stagedFiles.map((f) => f.path));
+              for (const f of staged) {
+                if (!existing.has(f.path)) continuePayload.stagedFiles.push(f);
+              }
+            }
+            setAgentStatus(continuePayload.progress ?? "Continuing…");
+          }
+
           if (event.type === "done") {
             receivedDone = true;
             setAgentStatus("");
-            // Safety net: if message bubble is still empty after all events
             if (!agentText.trim()) {
-              const fallback = phase === "plan"
-                ? "Analysis complete. See the plan below."
-                : staged.length > 0
-                  ? "Execution complete. Review the staged changes below and push when ready."
-                  : "⚠️ Agent finished but staged no files. Try switching to DeepSeek V3 or re-run the task.";
+              const fallback = staged.length > 0
+                ? "Execution complete. Review the staged changes below and push when ready."
+                : "⚠️ Agent finished but staged no files. Try switching to DeepSeek V3 or re-run the task.";
               agentText = fallback;
               setMessages((m) => {
                 const last = m[m.length - 1];
@@ -266,19 +271,13 @@ export default function Home() {
       }
     }
 
-    // FIX: Handle stream ending without a `done` event (Vercel timeout, network cut)
-    // This is why the message bubble was blank — the stream was cut before sending `done`
-    if (!receivedDone) {
+    // Stream ended without a done event (hard timeout / network cut)
+    if (!receivedDone && !continuePayload) {
       setAgentStatus("");
-      const fallback = agentText.trim()
-        ? agentText
-        : phase === "execute" && staged.length > 0
-          ? "Execution complete. Review the staged changes below."
-          : phase === "execute"
-            ? "⚠️ The request timed out mid-execution. Check if any files were staged below, or try a smaller task."
-            : "Analysis complete. See the plan below.";
-
       if (!agentText.trim()) {
+        const fallback = staged.length > 0
+          ? "Execution complete. Review the staged changes below."
+          : "⚠️ The request timed out mid-execution. Check if any files were staged below, or try a smaller task.";
         agentText = fallback;
         setMessages((m) => {
           const last = m[m.length - 1];
@@ -290,7 +289,33 @@ export default function Home() {
       }
     }
 
-    return { agentText, plan: parsedPlan, staged };
+    return { agentText, plan: parsedPlan, staged, continuePayload };
+  }
+
+  // ── Agent API call — supports resume via continuePayload ─────────────────────
+  async function callAgentApi(params: {
+    phase: "plan" | "execute";
+    task: string;
+    plan?: AgentPlan;
+    resumeMessages?: unknown[];
+    resumeStagedFiles?: StagedFile[];
+  }): Promise<Response> {
+    return fetch("/api/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task:               params.task,
+        repo:               activeRepo,
+        phase:              params.phase,
+        plan:               params.plan,
+        provider:           isAuto ? "qwen" : selectedProviderId,
+        model:              isAuto
+                              ? "qwen3-coder-plus"
+                              : selectedModel === "deepseek-reasoner" ? "deepseek-chat" : selectedModel,
+        resumeMessages:     params.resumeMessages,
+        resumeStagedFiles:  params.resumeStagedFiles,
+      }),
+    });
   }
 
   // ── Phase 1: Plan ────────────────────────────────────────────────────────────
@@ -314,7 +339,13 @@ export default function Home() {
     setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
     try {
-      const { agentText, plan } = await runAgentStream("plan", userText);
+      const res = await callAgentApi({ phase: "plan", task: userText });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? "Agent request failed");
+      }
+
+      const { agentText, plan } = await readAgentStream(res);
 
       if (plan) {
         setCurrentPlan(plan);
@@ -336,12 +367,12 @@ export default function Home() {
     }
   }
 
-  // ── Phase 2: Execute ─────────────────────────────────────────────────────────
+  // ── Phase 2: Execute (with auto-resume loop) ─────────────────────────────────
   async function executePlan(approvedPlan: AgentPlan) {
     setAgentPhase("executing");
     setLoading(true);
     setStagedFiles([]);
-    setCurrentPlan(null); // hide plan panel immediately
+    setCurrentPlan(null);
 
     const taskSnapshot   = currentTask;
     const approvalMsg: Message = { role: "user", content: "✓ Plan approved — execute it now." };
@@ -349,18 +380,59 @@ export default function Home() {
     setMessages(newMessages);
     setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
+    let resumeMessages:    unknown[]    | undefined;
+    let resumeStagedFiles: StagedFile[] | undefined;
+    let finalText = "";
+    let batchCount = 0;
+    const MAX_BATCHES = 20; // safety cap — prevents infinite loops
+
     try {
-      const { agentText, staged } = await runAgentStream("execute", taskSnapshot, approvedPlan);
+      while (batchCount < MAX_BATCHES) {
+        batchCount++;
+
+        const res = await callAgentApi({
+          phase:             "execute",
+          task:              taskSnapshot,
+          plan:              approvedPlan,
+          resumeMessages,
+          resumeStagedFiles,
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error ?? "Agent request failed");
+        }
+
+        const { agentText, staged, continuePayload } = await readAgentStream(res);
+
+        if (agentText && !agentText.startsWith("❌")) finalText = agentText;
+
+        // Merge any newly staged files into our running list
+        if (staged.length > 0) {
+          setStagedFiles((existing) => {
+            const existingPaths = new Set(existing.map((f) => f.path));
+            const newOnes = staged.filter((f) => !existingPaths.has(f.path));
+            return newOnes.length > 0 ? [...existing, ...newOnes] : existing;
+          });
+        }
+
+        // Server wants us to continue in a new request
+        if (continuePayload) {
+          resumeMessages    = continuePayload.messages;
+          resumeStagedFiles = continuePayload.stagedFiles;
+          // Small pause so the UI can breathe between batches
+          await new Promise((r) => setTimeout(r, 300));
+          continue;
+        }
+
+        // No continue payload = agent is done
+        break;
+      }
 
       setAgentPhase("done");
 
-      // Safety net: ensure staged files are set even if SSE race condition occurred
-      if (staged.length > 0) {
-        setStagedFiles((existing) => existing.length > 0 ? existing : staged);
-      }
-
       saveConversation(
-        [...newMessages, { role: "assistant", content: agentText }],
+        [...newMessages, { role: "assistant", content: finalText }],
         selectedProviderId, selectedModel, active?.project ?? projectInput
       );
     } catch (e) {
@@ -409,10 +481,8 @@ export default function Home() {
 
   function handleProjectSave() { setProject(projectInput); setEditingProject(false); }
 
-  const isAgentBusy     = agentPhase === "planning" || agentPhase === "executing";
-  const inputDisabled   = loading || (agentMode && !activeRepo) || agentPhase === "awaiting_approval";
-
-  // Show staged changes whenever there are staged files and we're not in the middle of awaiting approval
+  const isAgentBusy   = agentPhase === "planning" || agentPhase === "executing";
+  const inputDisabled = loading || (agentMode && !activeRepo) || agentPhase === "awaiting_approval";
   const showStagedChanges = stagedFiles.length > 0 && agentPhase !== "awaiting_approval";
 
   return (
@@ -613,7 +683,7 @@ export default function Home() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Plan approval — shown after planning phase completes */}
+          {/* Plan approval */}
           {agentPhase === "awaiting_approval" && currentPlan && (
             <PlanApproval
               plan={currentPlan}
@@ -624,7 +694,7 @@ export default function Home() {
             />
           )}
 
-          {/* Staged changes — shown whenever files are staged (regardless of phase) */}
+          {/* Staged changes */}
           {showStagedChanges && (
             <StagedChanges
               files={stagedFiles}

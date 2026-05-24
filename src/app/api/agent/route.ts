@@ -5,8 +5,8 @@ import { AGENT_TOOLS, type StagedFile } from "@/lib/agentTools";
 export const maxDuration = 300;
 
 const GH_BASE = "https://api.github.com";
-const MAX_ITERATIONS = 40;
-const MAX_TOKENS     = 16000;
+const MAX_ITERATIONS_PER_CALL = 8;   // stay well under timeout per request
+const MAX_TOKENS = 16000;
 
 // ── Phase 1: Plan ─────────────────────────────────────────────────────────────
 const PLAN_SYSTEM_PROMPT = `You are a senior software engineer analyzing a codebase to plan changes.
@@ -72,7 +72,7 @@ EXECUTION RULES:
 - For every file marked "create": call stage_file with complete new file content
 - Write FULL file content — if a file is 500 lines, write all 500 lines
 - Follow the existing code style exactly
-- After ALL files are staged, write a brief summary of what was done`;
+- After ALL files are staged, call stage_file for the last file then write a brief summary`;
 }
 
 // ── Tool helpers ──────────────────────────────────────────────────────────────
@@ -255,6 +255,9 @@ export async function POST(req: NextRequest) {
     model?: string;
     phase: "plan" | "execute";
     plan?: AgentPlan;
+    // Resume support: frontend passes these back after a mid-execution continuation
+    resumeMessages?: unknown[];
+    resumeStagedFiles?: StagedFile[];
   };
 
   try {
@@ -263,7 +266,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { task, repo, provider: providerId, model, phase, plan } = body;
+  const { task, repo, provider: providerId, model, phase, plan, resumeMessages, resumeStagedFiles } = body;
   if (!task || !repo || !phase) {
     return NextResponse.json({ error: "Missing task, repo, or phase" }, { status: 400 });
   }
@@ -284,7 +287,8 @@ export async function POST(req: NextRequest) {
     )
   );
 
-  const stagedFiles: StagedFile[] = [];
+  // Restore state from a previous interrupted call if resuming
+  const stagedFiles: StagedFile[] = resumeStagedFiles ? [...resumeStagedFiles] : [];
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -295,20 +299,23 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const phaseLabel = phase === "plan" ? "Analysing codebase" : "Executing plan";
+      const isResume = !!resumeMessages?.length;
+      const phaseLabel = isResume ? "Continuing execution" : phase === "plan" ? "Analysing codebase" : "Executing plan";
       send("progress", { text: `${phaseLabel} on **${repo}** using ${provider.name} / ${agentModel}…` });
 
       const systemPrompt = phase === "plan" ? PLAN_SYSTEM_PROMPT : buildExecutePrompt(plan!);
       const activeTools  = phase === "plan" ? planTools : AGENT_TOOLS;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const messages: any[] = [{ role: "user", content: task }];
+      const messages: any[] = resumeMessages?.length
+        ? [...resumeMessages]
+        : [{ role: "user", content: task }];
 
       let iterations = 0;
       let textWasSent = false;
       let consecutiveEmptyResponses = 0;
 
-      while (iterations < MAX_ITERATIONS) {
+      while (iterations < MAX_ITERATIONS_PER_CALL) {
         iterations++;
 
         let llmResponse;
@@ -412,19 +419,31 @@ export async function POST(req: NextRequest) {
             continue;
           }
         } else {
-          // Execute phase — check all planned files were staged
+          // Execute phase — check if all planned files were staged
           const missingPaths = plan?.changes
             .filter((c) => c.action !== "delete" && !stagedFiles.some((f) => f.path === c.path))
             .map((c) => `- ${c.path}`)
             .join("\n");
 
-          if (missingPaths && iterations < MAX_ITERATIONS) {
+          if (missingPaths && iterations < MAX_ITERATIONS_PER_CALL) {
             send("progress", { text: "Still staging remaining files…" });
             messages.push({
               role: "user",
               content: `You haven't staged all planned files yet. Still missing:\n${missingPaths}\n\nContinue — stage these files now.`,
             });
             continue;
+          }
+
+          // If there are still missing files but we've hit our per-call limit,
+          // emit a "continue" event so the frontend can resume in a new request
+          if (missingPaths) {
+            send("continue", {
+              messages,
+              stagedFiles,
+              progress: `Staged ${stagedFiles.length} file(s) so far. Continuing…`,
+            });
+            controller.close();
+            return;
           }
 
           if (rawText) {
@@ -436,6 +455,23 @@ export async function POST(req: NextRequest) {
         break;
       }
 
+      // ── Hit iteration cap mid-task — tell frontend to resume ───────────
+      const missingAfterLoop = plan?.changes
+        .filter((c) => c.action !== "delete" && !stagedFiles.some((f) => f.path === c.path))
+        .map((c) => `- ${c.path}`)
+        .join("\n");
+
+      if (phase === "execute" && missingAfterLoop && !textWasSent) {
+        send("continue", {
+          messages,
+          stagedFiles,
+          progress: `Staged ${stagedFiles.length} file(s) so far. Continuing in next batch…`,
+        });
+        controller.close();
+        return;
+      }
+
+      // ── Fallback message if agent produced no text ──────────────────────
       if (!textWasSent) {
         if (phase === "execute" && stagedFiles.length > 0) {
           const summary = [
