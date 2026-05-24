@@ -1,6 +1,6 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
 
 * {
   box-sizing: border-box;
@@ -9,8 +9,23 @@
 html,
 body {
   height: 100%;
+  /* Use dvh so mobile browsers with collapsible UI bars fill correctly */
+  height: 100dvh;
   background: #09090b;
   color: #e4e4e7;
+  /* Prevent iOS bounce scroll on the root */
+  overscroll-behavior: none;
+}
+
+/* iOS safe-area inset for the chat input so it clears the home bar */
+.pb-safe {
+  padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
+}
+
+/* Prevent content from poking under notches on landscape mobile */
+.px-safe {
+  padding-left:  max(16px, env(safe-area-inset-left,  16px));
+  padding-right: max(16px, env(safe-area-inset-right, 16px));
 }
 
 /* Add viewport meta tag configuration */
