@@ -8,6 +8,17 @@ const GH_BASE = "https://api.github.com";
 const MAX_ITERATIONS_PER_CALL = 15;  // was 8 — raised to handle larger plans
 const MAX_TOKENS = 32000;            // was 16000 — raised to reduce finish_reason=length
 
+// ── Timeout budget ────────────────────────────────────────────────────────────
+// Vercel Hobby: 60 s hard limit. Vercel Pro: 300 s.
+// We emit a "continue" event before the platform kills us so the frontend can
+// resume in a fresh request. Set AGENT_WATCHDOG_MS in your environment:
+//   Hobby  → 45000  (45 s — leaves 15 s buffer before the 60 s cut-off)
+//   Pro    → 240000 (4 min — leaves 1 min buffer before the 5 min cut-off)
+const REQUEST_BUDGET_MS  = parseInt(process.env.AGENT_WATCHDOG_MS ?? "45000", 10);
+// Per-LLM-call abort timeout — if a single call hangs longer than this we abort
+// it and either emit "continue" (mid-task) or "error" (planning phase).
+const PER_CALL_TIMEOUT_MS = Math.min(40_000, REQUEST_BUDGET_MS - 5_000);
+
 // ── Phase 1: Plan ─────────────────────────────────────────────────────────────
 const PLAN_SYSTEM_PROMPT = `You are a senior software engineer analyzing a codebase to plan changes.
 
@@ -330,8 +341,42 @@ export async function POST(req: NextRequest) {
       let iterations = 0;
       let textWasSent = false;
       let consecutiveEmptyResponses = 0;
+      const requestStart = Date.now();
+
+      /** True when we are close to the platform timeout and must hand off to the frontend */
+      function nearBudget(): boolean {
+        return Date.now() - requestStart >= REQUEST_BUDGET_MS;
+      }
 
       while (iterations < MAX_ITERATIONS_PER_CALL) {
+        // ── Watchdog: emit "continue" before Vercel kills the connection ──────
+        if (nearBudget()) {
+          const missing = plan?.changes
+            .filter((c) => c.action !== "delete" && !stagedFiles.some((f) => f.path === c.path))
+            .map((c) => `- ${c.path}`).join("\n");
+          if (phase === "execute" && missing) {
+            const prunedWatchdog = messages.map((m: Record<string, unknown>) => {
+              if (m.role !== "tool") return m;
+              try {
+                const p = JSON.parse(m.content as string ?? "{}");
+                if (typeof p.content === "string" && p.content.length > 500)
+                  return { ...m, content: JSON.stringify({ ...p, content: `[pruned]` }) };
+              } catch { /**/ }
+              return m;
+            });
+            send("continue", {
+              messages: prunedWatchdog,
+              stagedFiles,
+              progress: `Staged ${stagedFiles.length} file(s). Resuming in next request…`,
+            });
+            controller.close();
+            return;
+          }
+          // Planning phase or nothing staged — just end gracefully
+          break;
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         iterations++;
 
         let llmResponse;
@@ -340,19 +385,30 @@ export async function POST(req: NextRequest) {
           // so the model writes the summary instead of calling more tools.
           const forceText = phase === "execute" && allFilesStaged();
 
-          const res = await fetch(`${provider.baseUrl}/chat/completions`, {
-            method: "POST",
-            headers: llmHeaders(provider.apiKey, provider.baseUrl),
-            body: JSON.stringify(
-              buildRequestBody({
-                model: agentModel,
-                messages: [{ role: "system", content: systemPrompt }, ...messages],
-                tools: activeTools,
-                baseUrl: provider.baseUrl,
-                forceText,
-              })
-            ),
-          });
+          // Per-call abort — prevents a single slow LLM response from eating the
+          // whole request budget and leaving no time to emit a "continue" event.
+          const fetchAbort   = new AbortController();
+          const fetchTimeout = setTimeout(() => fetchAbort.abort(), PER_CALL_TIMEOUT_MS);
+
+          let res!: Response; // definite assignment — outer catch handles throw from inner try/finally
+          try {
+            res = await fetch(`${provider.baseUrl}/chat/completions`, {
+              method: "POST",
+              headers: llmHeaders(provider.apiKey, provider.baseUrl),
+              body: JSON.stringify(
+                buildRequestBody({
+                  model: agentModel,
+                  messages: [{ role: "system", content: systemPrompt }, ...messages],
+                  tools: activeTools,
+                  baseUrl: provider.baseUrl,
+                  forceText,
+                })
+              ),
+              signal: fetchAbort.signal,
+            });
+          } finally {
+            clearTimeout(fetchTimeout);
+          }
 
           if (!res.ok) {
             const errText = await res.text();
@@ -406,7 +462,32 @@ export async function POST(req: NextRequest) {
           }
           llmResponse = await res.json();
         } catch (e) {
-          send("error", { text: `Network error: ${(e as Error).message}` });
+          const err = e as Error;
+          // AbortError means PER_CALL_TIMEOUT_MS was exceeded — treat it like
+          // hitting the watchdog: emit "continue" for execute phase, error for plan.
+          if (err.name === "AbortError") {
+            if (phase === "execute" && stagedFiles.length > 0) {
+              const prunedAbort = messages.map((m: Record<string, unknown>) => {
+                if (m.role !== "tool") return m;
+                try {
+                  const p = JSON.parse(m.content as string ?? "{}");
+                  if (typeof p.content === "string" && p.content.length > 500)
+                    return { ...m, content: JSON.stringify({ ...p, content: "[pruned]" }) };
+                } catch { /**/ }
+                return m;
+              });
+              send("continue", {
+                messages: prunedAbort,
+                stagedFiles,
+                progress: `LLM call timed out — staged ${stagedFiles.length} file(s) so far. Resuming…`,
+              });
+              controller.close();
+              return;
+            }
+            send("error", { text: "⏱ The LLM took too long to respond. Try a faster model or a smaller task." });
+            break;
+          }
+          send("error", { text: `Network error: ${err.message}` });
           break;
         }
 
