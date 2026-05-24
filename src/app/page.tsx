@@ -192,6 +192,7 @@ export default function Home() {
     const decoder = new TextDecoder();
     let agentText            = "";
     let parsedPlan: AgentPlan | undefined;
+    let sseBuffer            = ""; // accumulates incomplete chunks
     const staged: StagedFile[]   = [];
     let receivedDone         = false;
     let continuePayload: ContinueEvent | undefined;
@@ -200,7 +201,12 @@ export default function Home() {
       const { done, value } = await reader.read();
       if (done) break;
 
-      for (const line of decoder.decode(value, { stream: true }).split("\n").filter((l) => l.startsWith("data: "))) {
+      // Append decoded chunk to buffer; split on newlines, keep trailing incomplete line
+      sseBuffer += decoder.decode(value, { stream: true });
+      const rawLines = sseBuffer.split("\n");
+      sseBuffer = rawLines.pop() ?? ""; // last element may be incomplete — hold it
+
+      for (const line of rawLines.filter((l) => l.startsWith("data: "))) {
         try {
           const event = JSON.parse(line.slice(6));
 
@@ -454,7 +460,7 @@ export default function Home() {
 
   async function sendMessage(text?: string) {
     const userText = (text ?? input).trim();
-    if (!userText || loading) return;
+    if (!userText || loading || isAgentBusy) return;
     setInput("");
     if (agentMode) {
       await startPlanning(userText);

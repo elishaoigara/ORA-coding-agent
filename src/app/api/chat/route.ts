@@ -38,6 +38,11 @@ function isQwenProvider(baseUrl: string): boolean {
   return baseUrl.includes("dashscope") || baseUrl.includes("aliyun");
 }
 
+/** Only actual Qwen/QwQ/QVQ models support enable_thinking — not DeepSeek via Dashscope */
+function isQwenModel(model: string): boolean {
+  return /^(qwen|qwq|qvq)/i.test(model);
+}
+
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("x-app-password");
   if (
@@ -106,8 +111,9 @@ export async function POST(req: NextRequest) {
     temperature: 0.2,
   };
 
-  // Qwen3 thinking mode causes malformed streaming chunks — disable it
-  if (isQwenProvider(provider.baseUrl)) {
+  // Qwen3 thinking mode causes malformed streaming chunks — disable it.
+  // Only apply to actual Qwen models, not DeepSeek served via the same Dashscope URL.
+  if (isQwenProvider(provider.baseUrl) && isQwenModel(resolvedModel || provider.defaultModel)) {
     payload.enable_thinking = false;
   }
 

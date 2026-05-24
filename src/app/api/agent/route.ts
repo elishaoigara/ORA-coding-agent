@@ -5,8 +5,8 @@ import { AGENT_TOOLS, type StagedFile } from "@/lib/agentTools";
 export const maxDuration = 300;
 
 const GH_BASE = "https://api.github.com";
-const MAX_ITERATIONS_PER_CALL = 8;   // stay well under timeout per request
-const MAX_TOKENS = 16000;
+const MAX_ITERATIONS_PER_CALL = 15;  // was 8 — raised to handle larger plans
+const MAX_TOKENS = 32000;            // was 16000 — raised to reduce finish_reason=length
 
 // ── Phase 1: Plan ─────────────────────────────────────────────────────────────
 const PLAN_SYSTEM_PROMPT = `You are a senior software engineer analyzing a codebase to plan changes.
@@ -209,6 +209,11 @@ function isQwenProvider(baseUrl: string): boolean {
   return baseUrl.includes("dashscope") || baseUrl.includes("aliyun");
 }
 
+/** Only actual Qwen/QwQ/QVQ models support enable_thinking — not DeepSeek via Dashscope */
+function isQwenModel(model: string): boolean {
+  return /^(qwen|qwq|qvq)/i.test(model);
+}
+
 function llmHeaders(apiKey: string, baseUrl: string): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -239,7 +244,7 @@ function buildRequestBody(params: {
     stream: false,
   };
 
-  if (isQwenProvider(params.baseUrl)) {
+  if (isQwenProvider(params.baseUrl) && isQwenModel(params.model)) {
     body.enable_thinking = false;
   }
 
@@ -399,7 +404,8 @@ export async function POST(req: NextRequest) {
           const planMatch = rawText.match(/<PLAN>([\s\S]*?)<\/PLAN>/);
           const textWithoutPlan = rawText.replace(/<PLAN>[\s\S]*?<\/PLAN>/g, "").trim();
 
-          if (textWithoutPlan) {
+          // Only stream analysis text once — if we're on a retry (no new text), skip it
+          if (textWithoutPlan && !textWasSent) {
             await streamText(textWithoutPlan, send);
             textWasSent = true;
           }
@@ -434,8 +440,10 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          // If there are still missing files but we've hit our per-call limit,
-          // emit a "continue" event so the frontend can resume in a new request
+          // If there are still missing files after we've hit our per-call limit,
+          // emit a "continue" event so the frontend can resume in a new request.
+          // NOTE: do NOT gate on textWasSent — missing files always need continuation
+          // regardless of whether the model wrote a partial summary.
           if (missingPaths) {
             send("continue", {
               messages,
@@ -461,7 +469,8 @@ export async function POST(req: NextRequest) {
         .map((c) => `- ${c.path}`)
         .join("\n");
 
-      if (phase === "execute" && missingAfterLoop && !textWasSent) {
+      // Always emit "continue" when files are still missing — do NOT gate on textWasSent
+      if (phase === "execute" && missingAfterLoop) {
         send("continue", {
           messages,
           stagedFiles,
@@ -490,7 +499,11 @@ export async function POST(req: NextRequest) {
             send
           );
         } else if (phase === "plan") {
-          await streamText("Analysis complete. See the plan below.", send);
+          await streamText(
+            "⚠️ The agent completed analysis but could not produce a structured plan. " +
+            "Please try rephrasing your task, or switch to a more capable model (DeepSeek V3.2 or Qwen3 Coder Plus).",
+            send
+          );
         }
       }
 
