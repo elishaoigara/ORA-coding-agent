@@ -1,18 +1,8 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { Message, InjectedFile, GitHubContext } from "@/types";
+import type { Message, InjectedFile, GitHubContext, Conversation } from "@/types";
 
-export interface Conversation {
-  id: string;
-  title: string;
-  project: string;
-  messages: Message[];
-  provider: string;
-  model: string;
-  githubContext?: GitHubContext;
-  createdAt: number;
-  updatedAt: number;
-}
+export type { Conversation };
 
 const LS_KEY      = "codeagent:conversations";
 const LS_GIST_KEY = "codeagent:gistId"; // cache the gist id so we skip the list-search on every save

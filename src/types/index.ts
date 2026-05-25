@@ -49,3 +49,15 @@ export interface GitHubContext {
   files: InjectedFile[];
   pinnedAt: number;
 }
+
+export interface Conversation {
+  id: string;
+  title: string;
+  project: string;
+  messages: Message[];
+  provider: string;
+  model: string;
+  githubContext?: GitHubContext;
+  createdAt: number;
+  updatedAt: number;
+}
