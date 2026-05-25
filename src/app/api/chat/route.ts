@@ -27,7 +27,6 @@ function buildHeaders(apiKey: string, baseUrl: string): Record<string, string> {
     "Content-Type": "application/json",
     Authorization: `Bearer ${apiKey}`,
   };
-  // Only send anthropic-version to Anthropic — other providers reject it
   if (baseUrl.includes("anthropic.com")) {
     headers["anthropic-version"] = "2023-06-01";
   }
@@ -38,9 +37,85 @@ function isQwenProvider(baseUrl: string): boolean {
   return baseUrl.includes("dashscope") || baseUrl.includes("aliyun");
 }
 
-/** Only actual Qwen/QwQ/QVQ models support enable_thinking — not DeepSeek via Dashscope */
 function isQwenModel(model: string): boolean {
   return /^(qwen|qwq|qvq)/i.test(model);
+}
+
+/**
+ * Wraps an upstream SSE stream and injects a final `event: usage` line
+ * containing token counts extracted from the last OpenAI-compatible data chunk.
+ *
+ * The injected event looks like:
+ *   event: usage
+ *   data: {"prompt_tokens":123,"completion_tokens":456,"provider":"groq","model":"llama-3.3-70b-versatile"}
+ *
+ * Existing clients that only handle `data:` lines will silently ignore it.
+ */
+function injectUsageEvent(
+  body: ReadableStream<Uint8Array>,
+  providerId: string,
+  modelId: string,
+): ReadableStream<Uint8Array> {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let lineBuffer = "";
+  let capturedUsage: Record<string, number> | null = null;
+
+  return new ReadableStream({
+    async start(controller) {
+      const reader = body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          // Forward chunk as-is
+          controller.enqueue(value);
+
+          // Also parse it to hunt for usage
+          lineBuffer += decoder.decode(value, { stream: true });
+          const lines = lineBuffer.split("\n");
+          lineBuffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (line.startsWith("data: ") && line !== "data: [DONE]") {
+              try {
+                const parsed = JSON.parse(line.slice(6));
+                if (parsed?.usage?.prompt_tokens != null) {
+                  capturedUsage = {
+                    prompt_tokens:     parsed.usage.prompt_tokens,
+                    completion_tokens: parsed.usage.completion_tokens ?? 0,
+                  };
+                }
+              } catch { /* not JSON or no usage */ }
+            }
+          }
+        }
+
+        // Flush final incomplete line
+        if (lineBuffer) {
+          try {
+            const parsed = JSON.parse(lineBuffer.replace(/^data: /, ""));
+            if (parsed?.usage?.prompt_tokens != null) {
+              capturedUsage = {
+                prompt_tokens:     parsed.usage.prompt_tokens,
+                completion_tokens: parsed.usage.completion_tokens ?? 0,
+              };
+            }
+          } catch { /* ignore */ }
+        }
+
+        // Inject usage event at end of stream
+        if (capturedUsage) {
+          const payload = { ...capturedUsage, provider: providerId, model: modelId };
+          const usageEvent = `\nevent: usage\ndata: ${JSON.stringify(payload)}\n\n`;
+          controller.enqueue(encoder.encode(usageEvent));
+        }
+      } finally {
+        controller.close();
+      }
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -109,13 +184,14 @@ export async function POST(req: NextRequest) {
     stream: true,
     max_tokens: maxTokens,
     temperature: 0.2,
+    stream_options: { include_usage: true }, // ← request usage from OpenAI-compat APIs
   };
 
-  // Qwen3 thinking mode causes malformed streaming chunks — disable it.
-  // Only apply to actual Qwen models, not DeepSeek served via the same Dashscope URL.
   if (isQwenProvider(provider.baseUrl) && isQwenModel(resolvedModel || provider.defaultModel)) {
     payload.enable_thinking = false;
   }
+
+  const finalModel = resolvedModel || provider.defaultModel;
 
   try {
     const upstream = await fetch(`${provider.baseUrl}/chat/completions`, {
@@ -132,14 +208,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return new NextResponse(upstream.body, {
+    const transformedBody = injectUsageEvent(
+      upstream.body!,
+      resolvedProviderId,
+      finalModel,
+    );
+
+    return new NextResponse(transformedBody, {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
         "X-Routed-Provider": resolvedProviderId ?? "",
-        "X-Routed-Model": resolvedModel || provider.defaultModel,
-        "X-Route-Reason": routeReason,
+        "X-Routed-Model":    finalModel,
+        "X-Route-Reason":    routeReason,
       },
     });
   } catch (e) {

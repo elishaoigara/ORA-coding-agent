@@ -1,15 +1,9 @@
+import type { TokenUsage } from "@/lib/tokenCost";
+
 export interface Message {
-  id: string;
   role: "user" | "assistant" | "system";
   content: string;
-  timestamp: Date;
-}
-
-export interface Conversation {
-  id: string;
-  title: string;
-  messages: Message[];
-  createdAt: Date;
+  usage?: TokenUsage;            // ← NEW: populated after each assistant response
 }
 
 export interface GitHubFile {
@@ -50,7 +44,7 @@ export interface PublicProvider {
 
 // Persisted GitHub context — saved per conversation
 export interface GitHubContext {
-  repo: string;          // e.g. "elishaoigara/ORA"
-  files: InjectedFile[]; // injected files
-  pinnedAt: number;      // timestamp
+  repo: string;
+  files: InjectedFile[];
+  pinnedAt: number;
 }
