@@ -1,6 +1,7 @@
 import type { TokenUsage } from "@/lib/tokenCost";
 
 export interface Message {
+  id?: string;
   role: "user" | "assistant" | "system";
   content: string;
   usage?: TokenUsage;            // ← NEW: populated after each assistant response

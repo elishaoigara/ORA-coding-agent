@@ -75,8 +75,8 @@ export default function ChatInterface({ conversation, onSendMessage, isLoading }
             </div>
           </div>
         ) : (
-          conversation.messages.map((message) => (
-            <ChatMessage key={message.id} message={message} />
+          conversation.messages.map((message, index) => (
+            <ChatMessage key={message.id ?? index} message={message} />
           ))
         )}
         <div ref={messagesEndRef} />
