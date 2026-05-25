@@ -80,7 +80,7 @@ export default function GitHubSidebar({ onFilesChange, savedContext, onClose }: 
     setSelectedRepo(repoFullName);
     setPath(browsePath);
     try {
-      const res = await fetch(`/api/github?action=tree&repo=${encodeURIComponent(repoFullName)}&path=${encodeURIComponent(browsePath)}`);
+      const res = await fetch(`/api/github?action=contents&repo=${encodeURIComponent(repoFullName)}&path=${encodeURIComponent(browsePath)}`);
       const data = await res.json();
       if (data.error) setError(data.error);
       else setTree(Array.isArray(data) ? data : [data]);
@@ -106,7 +106,7 @@ export default function GitHubSidebar({ onFilesChange, savedContext, onClose }: 
     setFolderLoading(dir.path);
     setError("");
     try {
-      const res = await fetch(`/api/github?action=folder&repo=${encodeURIComponent(selectedRepo)}&path=${encodeURIComponent(dir.path)}`);
+      const res = await fetch(`/api/github?action=read_all&repo=${encodeURIComponent(selectedRepo)}&path=${encodeURIComponent(dir.path)}`);
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
       const existing = new Set(injected.map((f) => f.path));
@@ -124,7 +124,7 @@ export default function GitHubSidebar({ onFilesChange, savedContext, onClose }: 
     setFolderLoading("__root__");
     setError("");
     try {
-      const res = await fetch(`/api/github?action=folder&repo=${encodeURIComponent(selectedRepo)}&path=`);
+      const res = await fetch(`/api/github?action=read_all&repo=${encodeURIComponent(selectedRepo)}&path=`);
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
       const newFiles: InjectedFile[] = data.files.map((f: { path: string; content: string }) => ({
