@@ -41,7 +41,7 @@ export default function ConversationList({
               <div className="flex-1 min-w-0">
                 <div className="truncate font-medium">{conversation.title}</div>
                 <div className="text-xs opacity-75">
-                  {conversation.createdAt.toLocaleDateString()}
+                  {new Date(conversation.createdAt).toLocaleDateString()}
                 </div>
               </div>
               <button 
