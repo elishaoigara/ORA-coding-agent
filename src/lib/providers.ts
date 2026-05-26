@@ -10,22 +10,25 @@ export interface ProviderConfig {
 
 const PROVIDERS: Record<Exclude<ProviderId, "auto">, ProviderConfig> = {
   openrouter: {
-    name: "OpenRouter (free)",
-    baseUrl: "https://openrouter.ai/api/v1",
-    apiKey: process.env.OPENROUTER_API_KEY ?? "",
-    defaultModel: "qwen/qwen3-coder:free",
-    models: [
-      // ── Best free coding models ────────────────────────────────────────
-      { id: "qwen/qwen3-coder:free",                     label: "Qwen3 Coder ★ (262K ctx)" },
-      { id: "deepseek/deepseek-r1:free",                 label: "DeepSeek R1 – Reasoning (163K ctx)" },
-      { id: "deepseek/deepseek-chat-v3-0324:free",       label: "DeepSeek V3 Chat (163K ctx)" },
-      { id: "google/gemini-2.0-flash-exp:free",          label: "Gemini 2.0 Flash (1M ctx)" },
-      { id: "meta-llama/llama-3.3-70b-instruct:free",    label: "LLaMA 3.3 70B (131K ctx)" },
-      { id: "qwen/qwen3-235b-a22b:free",                 label: "Qwen3 235B (131K ctx)" },
-      { id: "microsoft/mai-ds-r1:free",                  label: "Microsoft MAI-DS-R1 (163K ctx)" },
-      { id: "nousresearch/hermes-3-llama-3.1-405b:free", label: "Hermes 3 405B (131K ctx)" },
-    ],
-  },
+  name: "OpenRouter (free)",
+  baseUrl: "https://openrouter.ai/api/v1",
+  apiKey: process.env.OPENROUTER_API_KEY ?? "",
+  defaultModel: "deepseek/deepseek-v4-flash:free",
+  models: [
+    // ── Free coding models (updated May 2026) ─────────────────────────
+    { id: "deepseek/deepseek-v4-flash:free",               label: "DeepSeek V4 Flash ★ (1M ctx)" },
+    { id: "qwen/qwen3-coder:free",                         label: "Qwen3 Coder (262K ctx)" },
+    { id: "openai/gpt-oss-120b:free",                      label: "OpenAI gpt-oss-120B (131K ctx)" },
+    { id: "google/gemini-2.0-flash-exp:free",              label: "Gemini 2.0 Flash (1M ctx)" },
+    { id: "z-ai/glm-4.5-air:free",                         label: "GLM 4.5 Air (131K ctx)" },
+    { id: "meta-llama/llama-3.3-70b-instruct:free",        label: "LLaMA 3.3 70B (131K ctx)" },
+    { id: "qwen/qwen3-235b-a22b:free",                     label: "Qwen3 235B (131K ctx)" },
+    { id: "microsoft/mai-ds-r1:free",                      label: "Microsoft MAI-DS-R1 (163K ctx)" },
+    { id: "nousresearch/hermes-3-llama-3.1-405b:free",     label: "Hermes 3 405B (131K ctx)" },
+    { id: "deepseek/deepseek-r1:free",                     label: "DeepSeek R1 Reasoning (163K ctx)" },
+    { id: "deepseek/deepseek-chat:free",                   label: "DeepSeek V3 Chat (163K ctx)" },
+  ],
+},
   groq: {
     name: "Groq",
     baseUrl: "https://api.groq.com/openai/v1",
