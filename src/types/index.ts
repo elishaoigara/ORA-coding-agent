@@ -4,7 +4,7 @@ export interface Message {
   id?: string;
   role: "user" | "assistant" | "system";
   content: string;
-  usage?: TokenUsage;            // ← NEW: populated after each assistant response
+  usage?: TokenUsage;
 }
 
 export interface GitHubFile {
@@ -43,7 +43,6 @@ export interface PublicProvider {
   configured: boolean;
 }
 
-// Persisted GitHub context — saved per conversation
 export interface GitHubContext {
   repo: string;
   files: InjectedFile[];
@@ -58,6 +57,7 @@ export interface Conversation {
   provider: string;
   model: string;
   githubContext?: GitHubContext;
+  systemPrompt?: string;       // ← NEW: per-conversation custom system prompt
   createdAt: number;
   updatedAt: number;
 }
