@@ -12,6 +12,7 @@ import { formatTokens, formatCost } from "@/lib/tokenCost";
 interface Props {
   message: Message;
   activeRepo?: string;
+  onSaveSnippet?: (lang: string, code: string) => void;  // ADD THIS
 }
 
 // Languages we can run inline in a sandboxed iframe
@@ -143,8 +144,8 @@ function TokenBadge({ message }: { message: Message & { usage?: { totalTokens: n
   );
 }
 
-// ── Code block with run button ────────────────────────────────────────────────
-function CodeBlock({ lang, code, activeRepo }: { lang: string; code: string; activeRepo?: string }) {
+// ── Code block with run button and save snippet ───────────────────────────────
+function CodeBlock({ lang, code, activeRepo, onSaveSnippet }: { lang: string; code: string; activeRepo?: string; onSaveSnippet?: (lang: string, code: string) => void }) {
   const [copied, setCopied] = useState(false);
   const { output, running, run, clear } = useCodeRunner();
   const canRun = RUNNABLE_LANGS.has(lang.toLowerCase());
@@ -155,12 +156,27 @@ function CodeBlock({ lang, code, activeRepo }: { lang: string; code: string; act
     setTimeout(() => setCopied(false), 2000);
   }
 
+  function saveSnippet() {
+    if (onSaveSnippet) {
+      onSaveSnippet(lang, code);
+    }
+  }
+
   return (
     <div className="my-3 rounded-lg overflow-hidden border border-zinc-700">
       {/* Header bar */}
       <div className="flex items-center justify-between bg-zinc-900 px-3 py-1.5 border-b border-zinc-700">
         <span className="text-xs text-zinc-500 font-mono">{lang}</span>
         <div className="flex items-center gap-2">
+          {onSaveSnippet && (
+            <button
+              onClick={saveSnippet}
+              className="text-xs text-purple-600 hover:text-purple-400 transition-colors"
+              title="Save to snippet library"
+            >
+              💾
+            </button>
+          )}
           {canRun && (
             <button
               onClick={() => output ? clear() : run(code)}
@@ -221,7 +237,7 @@ function CodeBlock({ lang, code, activeRepo }: { lang: string; code: string; act
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function ChatMessage({ message, activeRepo }: Props) {
+export default function ChatMessage({ message, activeRepo, onSaveSnippet }: Props) {
   const isUser = message.role === "user";
   const [showPush, setShowPush] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -272,6 +288,7 @@ export default function ChatMessage({ message, activeRepo }: Props) {
                         lang={match[1]}
                         code={codeStr}
                         activeRepo={activeRepo}
+                        onSaveSnippet={onSaveSnippet}
                       />
                     );
                   },

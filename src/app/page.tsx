@@ -67,12 +67,26 @@ export default function Home() {
   const [localFiles, setLocalFiles]       = useState<InjectedFile[]>([]);
   const [convUsage, setConvUsage]         = useState<TokenUsage | null>(null);
 
+  // ── Daily workflow booster state ─────────────────────────────────────────────
+  const [systemPrompt, setSystemPrompt]   = useState("");
+  const [showSystemPrompt, setShowSystemPrompt] = useState(false);
+  const [branchFirst, setBranchFirst]     = useState(false);
+  const [agentBranch, setAgentBranch]     = useState("");
+  const [searchQuery, setSearchQuery]     = useState("");
+  const [snippets, setSnippets]           = useState<{id:string;label:string;lang:string;code:string}[]>(() => {
+    try { return JSON.parse(localStorage.getItem("codeagent:snippets") ?? "[]"); } catch { return []; }
+  });
+  const [showSnippets, setShowSnippets]   = useState(false);
+  const [pinnedFiles, setPinnedFiles]     = useState<Record<string,string[]>>(() => {
+    try { return JSON.parse(localStorage.getItem("codeagent:pinnedFiles") ?? "{}"); } catch { return {}; }
+  });
+
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const {
     conversations, active, activeId, syncing,
     newConversation, saveConversation, saveGitHubContext,
-    loadConversation, deleteConversation, setProject,
+    loadConversation, deleteConversation, setProject, saveSystemPrompt,
   } = useConversations();
 
   useKeyboardShortcuts({
@@ -98,6 +112,7 @@ export default function Home() {
       const p = providers.find((p) => p.id === active.provider);
       setSelectedModel(active.model || p?.defaultModel || "");
       setProjectInput(active.project || "");
+      setSystemPrompt(active.systemPrompt || "");
       if (active.githubContext) {
         setActiveRepo(active.githubContext.repo);
         setInjectedFiles(active.githubContext.files);
@@ -106,6 +121,7 @@ export default function Home() {
       setMessages([]);
       setRoutingBadges({});
       setProjectInput("");
+      setSystemPrompt("");
       setInjectedFiles([]);
       setActiveRepo("");
     }
@@ -138,12 +154,16 @@ export default function Home() {
     const assistantIndex = newMessages.length;
     setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
+    const messagesWithSys: Message[] = systemPrompt.trim()
+      ? [{ role: "system", content: systemPrompt.trim() }, ...newMessages]
+      : newMessages;
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-app-password": password },
         body: JSON.stringify({
-          messages: newMessages,
+          messages: messagesWithSys,
           model: selectedModel,
           provider: selectedProviderId,
           injectedFiles,
@@ -364,6 +384,23 @@ export default function Home() {
       return;
     }
 
+    if (branchFirst && activeRepo) {
+      const slug = userText.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40).replace(/-$/, "");
+      const newBranch = `agent/${slug}-${Date.now().toString(36)}`;
+      try {
+        await fetch("/api/github", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "create_branch", repo: activeRepo, branchName: newBranch }),
+        });
+        setAgentBranch(newBranch);
+      } catch {
+        console.warn("Branch creation failed, continuing on default branch");
+      }
+    } else {
+      setAgentBranch("");
+    }
+
     setCurrentTask(userText);
     setCurrentPlan(null);
     setStagedFiles([]);
@@ -503,12 +540,62 @@ export default function Home() {
     setMessages([]);
     setRoutingBadges({});
     setProjectInput("");
+    setSystemPrompt("");
     setInjectedFiles([]);
     setActiveRepo("");
     setStagedFiles([]);
     setCurrentPlan(null);
     setAgentPhase("idle");
     setConvUsage(null);
+    setAgentBranch("");
+  }
+
+  function exportMarkdown() {
+    const lines: string[] = [];
+    if (active?.project) lines.push(`# ${active.project}\n`);
+    lines.push(`*Exported ${new Date().toLocaleString()}*\n`);
+    if (systemPrompt.trim()) lines.push(`\n> **System prompt:** ${systemPrompt.trim()}\n`);
+    messages.forEach((m) => {
+      lines.push(`\n---\n**${m.role === "user" ? "You" : "Assistant"}:**\n\n${m.content}`);
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `${(active?.project || active?.title || "chat").replace(/\s+/g, "-")}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function saveSnippet(lang: string, code: string) {
+    const label = prompt("Label for this snippet:", `${lang} snippet`) ?? "";
+    if (!label.trim()) return;
+    const updated = [...snippets, { id: crypto.randomUUID(), label: label.trim(), lang, code }];
+    setSnippets(updated);
+    localStorage.setItem("codeagent:snippets", JSON.stringify(updated));
+  }
+
+  function deleteSnippet(id: string) {
+    const updated = snippets.filter((s) => s.id !== id);
+    setSnippets(updated);
+    localStorage.setItem("codeagent:snippets", JSON.stringify(updated));
+  }
+
+  function insertSnippet(code: string) {
+    setInput((prev) => prev + (prev ? "\n" : "") + "```\n" + code + "\n```");
+    setShowSnippets(false);
+  }
+
+  function togglePinnedFile(repo: string, filePath: string) {
+    setPinnedFiles((prev) => {
+      const current = prev[repo] ?? [];
+      const updated = current.includes(filePath)
+        ? current.filter((p) => p !== filePath)
+        : [...current, filePath];
+      const next = { ...prev, [repo]: updated };
+      localStorage.setItem("codeagent:pinnedFiles", JSON.stringify(next));
+      return next;
+    });
   }
 
   function handleProjectSave() { setProject(projectInput); setEditingProject(false); }
@@ -518,381 +605,405 @@ export default function Home() {
   const showStagedChanges = stagedFiles.length > 0 && agentPhase !== "awaiting_approval";
 
   return (
-    <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden">
-      {/* Header */}
-      <header className="border-b border-zinc-800 px-3 md:px-4 py-2.5 flex items-center gap-2 md:gap-3 flex-shrink-0 bg-zinc-950 min-w-0">
-        <button onClick={() => setShowHistory((s) => !s)} className="text-zinc-500 hover:text-zinc-200 text-xs">🕐</button>
-        <span className="text-teal-400 font-mono font-bold tracking-tight">
-          code<span className="text-zinc-400">agent</span>
-        </span>
+    <div className="h-screen flex overflow-hidden" style={{background:"#0a0a0a",color:"#e4e4e7"}}>
 
-        <div className="hidden md:flex items-center gap-2">
-          {editingProject ? (
-            <input
-              value={projectInput}
-              onChange={(e) => setProjectInput(e.target.value)}
-              onBlur={handleProjectSave}
-              onKeyDown={(e) => { if (e.key === "Enter") handleProjectSave(); if (e.key === "Escape") setEditingProject(false); }}
-              placeholder="Project name…"
-              className="bg-zinc-800 border border-zinc-600 rounded px-2 py-0.5 text-zinc-300 text-xs w-32 focus:outline-none focus:border-teal-600"
-              autoFocus
-            />
+      {/* ── LEFT SIDEBAR ─────────────────────────────────────────────── */}
+      <aside style={{width:"240px",borderRight:"1px solid #1e1e1e",background:"#111",display:"flex",flexDirection:"column",flexShrink:0}}>
+
+        <div style={{padding:"14px 12px 10px",borderBottom:"1px solid #1e1e1e"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"10px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:"7px"}}>
+              <div style={{width:"26px",height:"26px",borderRadius:"6px",background:"linear-gradient(135deg,#14b87a,#0f6e56)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",fontWeight:700,color:"#fff",letterSpacing:"-0.5px"}}>O</div>
+              <div>
+                <span style={{fontSize:"13px",fontWeight:600,color:"#fff",letterSpacing:"-0.3px"}}>ORA</span>
+                <span style={{fontSize:"10px",color:"#555",marginLeft:"5px"}}>coding agent</span>
+              </div>
+            </div>
+            {syncing && <span style={{fontSize:"10px",color:"#555"}} title="Syncing…">↻</span>}
+          </div>
+          <button
+            onClick={handleNewChat}
+            style={{width:"100%",display:"flex",alignItems:"center",gap:"7px",background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"8px",padding:"8px 10px",color:"#ccc",fontSize:"12px",cursor:"pointer",transition:"all .15s"}}
+            onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.borderColor="#14b87a";(e.currentTarget as HTMLElement).style.color="#fff"}}
+            onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.borderColor="#2a2a2a";(e.currentTarget as HTMLElement).style.color="#ccc"}}
+          >
+            <span style={{fontSize:"16px",color:"#14b87a",lineHeight:1}}>＋</span>
+            <span>New chat</span>
+            <span style={{marginLeft:"auto",fontSize:"10px",color:"#444",fontFamily:"monospace",background:"#222",border:"1px solid #333",borderRadius:"3px",padding:"1px 4px"}}>⌘K</span>
+          </button>
+        </div>
+
+        <div style={{padding:"10px 12px 6px",position:"relative"}}>
+          <span style={{position:"absolute",left:"22px",top:"50%",transform:"translateY(-50%)",fontSize:"13px",color:"#444",pointerEvents:"none"}}>🔍</span>
+          <input
+            value={searchQuery}
+            onChange={e=>setSearchQuery(e.target.value)}
+            placeholder="Search chats…"
+            style={{width:"100%",background:"#1a1a1a",border:"1px solid #222",borderRadius:"7px",padding:"6px 8px 6px 28px",fontSize:"12px",color:"#ccc",outline:"none",boxSizing:"border-box"}}
+          />
+        </div>
+
+        <div style={{flex:1,overflowY:"auto",padding:"0 8px 8px"}}>
+          <div style={{fontSize:"10px",color:"#444",textTransform:"uppercase",letterSpacing:".08em",padding:"6px 4px 4px"}}>Recent</div>
+          {conversations.length === 0 && (
+            <div style={{fontSize:"12px",color:"#444",textAlign:"center",padding:"20px 8px"}}>No chats yet</div>
+          )}
+          {conversations
+            .filter(c => !searchQuery.trim() || c.title.toLowerCase().includes(searchQuery.toLowerCase()) || c.project?.toLowerCase().includes(searchQuery.toLowerCase()) || c.messages.some(m=>m.content.toLowerCase().includes(searchQuery.toLowerCase())))
+            .map((conv) => (
+              <div
+                key={conv.id}
+                onClick={() => loadConversation(conv.id)}
+                style={{
+                  display:"flex",alignItems:"center",gap:"8px",padding:"7px 8px",borderRadius:"7px",cursor:"pointer",marginBottom:"2px",
+                  background: activeId === conv.id ? "#0f2e24" : "transparent",
+                  border: activeId === conv.id ? "1px solid #1D9E75" : "1px solid transparent",
+                  transition:"all .1s",
+                }}
+                onMouseEnter={e=>{if(activeId!==conv.id)(e.currentTarget as HTMLElement).style.background="#1a1a1a"}}
+                onMouseLeave={e=>{if(activeId!==conv.id)(e.currentTarget as HTMLElement).style.background="transparent"}}
+              >
+                <div style={{width:"6px",height:"6px",borderRadius:"50%",background: activeId===conv.id ? "#14b87a" : "#2a2a2a",flexShrink:0}} />
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:"12px",color: activeId===conv.id ? "#fff" : "#ccc",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{conv.title}</div>
+                  <div style={{fontSize:"10px",color:"#555",marginTop:"1px"}}>
+                    {conv.project && <span style={{color:"#14b87a",marginRight:"4px"}}>{conv.project}</span>}
+                    {new Date(conv.updatedAt).toLocaleDateString()}
+                    {conv.systemPrompt && <span style={{marginLeft:"4px",color:"#8b5cf6"}} title="Has system prompt">⚙</span>}
+                  </div>
+                </div>
+                <button
+                  onClick={e=>{e.stopPropagation();deleteConversation(conv.id)}}
+                  style={{opacity:0,fontSize:"11px",color:"#555",background:"none",border:"none",cursor:"pointer",padding:"2px",borderRadius:"3px",flexShrink:0}}
+                  onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color="#ef4444"}}
+                  onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color="#555"}}
+                  className="conv-del-btn"
+                  title="Delete"
+                >✕</button>
+              </div>
+            ))}
+        </div>
+
+        <div style={{borderTop:"1px solid #1e1e1e",margin:"0 12px"}} />
+
+        <div style={{padding:"10px 12px 12px"}}>
+          <div style={{fontSize:"10px",color:"#444",textTransform:"uppercase",letterSpacing:".08em",marginBottom:"7px"}}>Context</div>
+          {activeRepo ? (
+            <>
+              <div style={{display:"flex",alignItems:"center",gap:"6px",background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"7px",padding:"6px 8px",marginBottom:"5px",cursor:"pointer"}}
+                onClick={()=>setShowGitHub(v=>!v)}>
+                <span style={{fontSize:"13px"}}>⑂</span>
+                <span style={{fontSize:"12px",color:"#ccc",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{activeRepo.split("/")[1]}</span>
+                <span style={{fontSize:"10px",background:"#0f2e24",color:"#14b87a",border:"1px solid #1D9E75",borderRadius:"4px",padding:"1px 5px"}}>main</span>
+              </div>
+              {(pinnedFiles[activeRepo]??[]).slice(0,3).map(f=>(
+                <div key={f} style={{display:"flex",alignItems:"center",gap:"5px",padding:"4px 8px",marginBottom:"2px",background:"#161616",border:"1px solid #1e1e1e",borderRadius:"5px"}}>
+                  <span style={{fontSize:"11px",color:"#EF9F27"}}>📌</span>
+                  <span style={{fontSize:"11px",color:"#888",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{f.split("/").pop()}</span>
+                </div>
+              ))}
+              {injectedFiles.length > 0 && !(pinnedFiles[activeRepo]??[]).length && (
+                <div style={{fontSize:"11px",color:"#14b87a",padding:"3px 4px"}}>📎 {injectedFiles.length} file{injectedFiles.length>1?"s":""} in context</div>
+              )}
+            </>
           ) : (
-            <button
-              onClick={() => setEditingProject(true)}
-              className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 hover:border-zinc-600 rounded px-2 py-0.5 transition-colors"
+            <button onClick={()=>setShowGitHub(true)} style={{width:"100%",background:"#1a1a1a",border:"1px dashed #2a2a2a",borderRadius:"7px",padding:"8px",fontSize:"12px",color:"#555",cursor:"pointer",transition:"all .15s"}}
+              onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.borderColor="#14b87a";(e.currentTarget as HTMLElement).style.color="#ccc"}}
+              onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.borderColor="#2a2a2a";(e.currentTarget as HTMLElement).style.color="#555"}}
             >
-              {active?.project || projectInput || "＋ project"}
+              + Connect GitHub repo
             </button>
           )}
-
-          {convUsage && convUsage.totalTokens > 0 && (
-            <span className="text-xs text-zinc-600 tabular-nums">
-              {formatTokens(convUsage.totalTokens)} · {formatCost(convUsage.estimatedCostUsd)}
-            </span>
-          )}
         </div>
+      </aside>
 
-        {/* Mode toggle */}
-        <div className="flex items-center bg-zinc-800 border border-zinc-700 rounded-lg p-0.5 gap-0.5 flex-shrink-0">
-          <button
-            onClick={() => { setAgentMode(false); setCurrentPlan(null); setAgentPhase("idle"); }}
-            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${!agentMode ? "bg-zinc-600 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
-          >
-            Chat
-          </button>
-          <button
-            onClick={() => setAgentMode(true)}
-            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${agentMode ? "bg-teal-800 text-teal-100" : "text-zinc-500 hover:text-zinc-300"}`}
-          >
-            ⚡ Agent
-          </button>
-        </div>
+      {/* ── MAIN AREA ────────────────────────────────────────────────── */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
 
-        {/* Provider + model — desktop only */}
-        <div className="hidden md:flex items-center gap-2">
-          <select
-            value={selectedProviderId}
-            onChange={(e) => handleProviderChange(e.target.value)}
-            className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600"
-          >
+        <header style={{height:"48px",display:"flex",alignItems:"center",gap:"10px",padding:"0 16px",borderBottom:"1px solid #1e1e1e",background:"#111",flexShrink:0}}>
+          <div style={{display:"flex",background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"8px",padding:"2px",gap:"2px"}}>
+            <button
+              onClick={()=>{setAgentMode(false);setCurrentPlan(null);setAgentPhase("idle")}}
+              style={{fontSize:"12px",padding:"4px 12px",borderRadius:"6px",border:"none",cursor:"pointer",background:!agentMode?"#2a2a2a":"transparent",color:!agentMode?"#fff":"#666",fontWeight:!agentMode?500:400,transition:"all .15s"}}
+            >Chat</button>
+            <button
+              onClick={()=>setAgentMode(true)}
+              style={{fontSize:"12px",padding:"4px 12px",borderRadius:"6px",border:"none",cursor:"pointer",background:agentMode?"#0f2e24":"transparent",color:agentMode?"#14b87a":"#666",fontWeight:agentMode?500:400,transition:"all .15s"}}
+            >⚡ Agent</button>
+          </div>
+
+          <select value={selectedProviderId} onChange={e=>handleProviderChange(e.target.value)}
+            style={{background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"7px",color:"#aaa",fontSize:"12px",padding:"4px 8px",outline:"none",cursor:"pointer"}}>
             <option value="auto">⚡ Auto</option>
-            <option disabled>──────────</option>
-            {providers.map((p) => (
-              <option key={p.id} value={p.id} disabled={!p.configured}>
-                {p.name}{!p.configured ? " (no key)" : ""}
-              </option>
-            ))}
+            <option disabled>──────</option>
+            {providers.map(p=><option key={p.id} value={p.id} disabled={!p.configured}>{p.name}{!p.configured?" (no key)":""}</option>)}
           </select>
           {!isAuto && activeProvider && (
-            <>
-              <span className="text-zinc-700 text-xs">/</span>
-              <select
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="bg-zinc-800 border border-zinc-700 rounded-md text-zinc-300 text-xs px-2 py-1 focus:outline-none focus:border-teal-600"
-              >
-                {(activeProvider?.models ?? []).map((m) => (
-                  <option key={m.id} value={m.id}>{m.label}</option>
-                ))}
-              </select>
-            </>
+            <select value={selectedModel} onChange={e=>setSelectedModel(e.target.value)}
+              style={{background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"7px",color:"#aaa",fontSize:"12px",padding:"4px 8px",outline:"none",cursor:"pointer"}}>
+              {(activeProvider?.models??[]).map(m=><option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
           )}
-          {isAuto && (
-            <span className="text-xs text-amber-400 bg-amber-950 border border-amber-800 rounded-full px-2 py-0.5">
-              picks best model
-            </span>
-          )}
-        </div>
+          {isAuto && <span style={{fontSize:"11px",color:"#d97706",background:"#1c1206",border:"1px solid #78350f",borderRadius:"20px",padding:"2px 8px"}}>picks best model</span>}
 
-        <div className="ml-auto flex items-center gap-2 md:gap-3 min-w-0">
-          {activeRepo && (
-            <span className="text-xs text-zinc-500 bg-zinc-800 border border-zinc-700 rounded-full px-2 py-0.5 font-mono truncate max-w-36">
-              {activeRepo.split("/")[1]}
-            </span>
-          )}
-          {injectedFiles.length > 0 && (
-            <span className="text-xs text-teal-500 bg-teal-950 border border-teal-800 rounded-full px-2 py-0.5">
-              📌 {injectedFiles.length} file{injectedFiles.length > 1 ? "s" : ""}
-            </span>
-          )}
-          {syncing && (
-            <span className="text-zinc-600 text-xs hidden md:inline" title="Syncing to GitHub Gist…">↻</span>
-          )}
-          <button
-            onClick={() => setShowGitHub((s) => !s)}
-            className={`text-xs transition-colors ${showGitHub ? "text-teal-400" : "text-zinc-500 hover:text-zinc-300"}`}
-          >
-            GitHub
-          </button>
-          <button
-            onClick={() => setMobileSettings(true)}
-            className="md:hidden text-zinc-500 hover:text-zinc-200 px-1.5 py-1 text-sm"
-            title="Provider settings"
-          >
-            ⋮
-          </button>
-        </div>
-      </header>
-
-      {/* Mobile settings bottom sheet */}
-      {mobileSettings && (
-        <>
-          <div className="fixed inset-0 bg-black/60 z-50 md:hidden" onClick={() => setMobileSettings(false)} />
-          <div className="fixed bottom-0 left-0 right-0 z-50 bg-zinc-900 border-t border-zinc-700 rounded-t-2xl p-5 space-y-4 md:hidden">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-zinc-300 text-sm font-semibold">Settings</span>
-              <button onClick={() => setMobileSettings(false)} className="text-zinc-500 hover:text-zinc-200 text-lg">✕</button>
-            </div>
-            <div>
-              <label className="text-zinc-500 text-xs mb-1 block">Project</label>
-              {editingProject ? (
-                <input value={projectInput} onChange={(e) => setProjectInput(e.target.value)}
-                  onBlur={handleProjectSave}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleProjectSave(); if (e.key === "Escape") setEditingProject(false); }}
-                  placeholder="Project name…"
-                  className="w-full bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 text-zinc-300 text-sm focus:outline-none focus:border-teal-600"
-                  autoFocus />
-              ) : (
-                <button onClick={() => setEditingProject(true)}
-                  className="w-full text-left text-sm text-zinc-400 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 hover:border-zinc-500">
-                  {active?.project || projectInput || "＋ Add project name"}
-                </button>
-              )}
-            </div>
-            <div>
-              <label className="text-zinc-500 text-xs mb-1 block">Provider</label>
-              <select value={selectedProviderId} onChange={(e) => handleProviderChange(e.target.value)}
-                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:outline-none focus:border-teal-600">
-                <option value="auto">⚡ Auto</option>
-                <option disabled>──────────</option>
-                {providers.map((p) => (
-                  <option key={p.id} value={p.id} disabled={!p.configured}>
-                    {p.name}{!p.configured ? " (no key)" : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {!isAuto && activeProvider && (
-              <div>
-                <label className="text-zinc-500 text-xs mb-1 block">Model</label>
-                <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:outline-none focus:border-teal-600">
-                  {(activeProvider?.models ?? []).map((m) => (
-                    <option key={m.id} value={m.id}>{m.label}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:"8px"}}>
             {convUsage && convUsage.totalTokens > 0 && (
-              <p className="text-zinc-600 text-xs text-center">
-                {formatTokens(convUsage.totalTokens)} · {formatCost(convUsage.estimatedCostUsd)}
-              </p>
+              <span style={{fontSize:"11px",color:"#444",fontFamily:"monospace"}}>{formatTokens(convUsage.totalTokens)} · {formatCost(convUsage.estimatedCostUsd)}</span>
             )}
-            {syncing && <p className="text-zinc-600 text-xs text-center">↻ Syncing to GitHub Gist…</p>}
+            <button onClick={()=>setShowSystemPrompt(v=>!v)}
+              style={{fontSize:"12px",padding:"4px 10px",background:systemPrompt.trim()?"#1e0a3c":"#1a1a1a",border:`1px solid ${systemPrompt.trim()?"#6d28d9":"#2a2a2a"}`,borderRadius:"7px",color:systemPrompt.trim()?"#a78bfa":"#666",cursor:"pointer"}}
+              title="System prompt">⚙ prompt</button>
+            <button onClick={()=>setShowSnippets(v=>!v)}
+              style={{fontSize:"12px",padding:"4px 10px",background:"#1a1a1a",border:`1px solid ${showSnippets?"#b45309":"#2a2a2a"}`,borderRadius:"7px",color:showSnippets?"#f59e0b":"#666",cursor:"pointer"}}
+              title="Snippet library">📎 {snippets.length>0?`${snippets.length} snips`:"snippets"}</button>
+            <button onClick={exportMarkdown} disabled={messages.length===0}
+              style={{fontSize:"12px",padding:"4px 10px",background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"7px",color:messages.length>0?"#666":"#333",cursor:messages.length>0?"pointer":"default"}}
+              title="Export as Markdown">↓ .md</button>
+            <button onClick={()=>setShowGitHub(s=>!s)}
+              style={{fontSize:"12px",padding:"4px 10px",background:showGitHub?"#0f2e24":"#1a1a1a",border:`1px solid ${showGitHub?"#1D9E75":"#2a2a2a"}`,borderRadius:"7px",color:showGitHub?"#14b87a":"#666",cursor:"pointer"}}>
+              ⑂ GitHub
+            </button>
           </div>
-        </>
-      )}
+        </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        {showHistory && (
-          <div className="fixed md:static inset-y-0 left-0 z-40 w-72 md:w-60 border-r border-zinc-800 flex flex-col bg-zinc-950 flex-shrink-0 shadow-xl md:shadow-none">
-            <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
-              <span className="text-zinc-500 text-xs uppercase tracking-wider">History</span>
-              <button onClick={() => setShowHistory(false)} className="md:hidden text-zinc-600 hover:text-zinc-300 text-sm">✕</button>
-            </div>
-            <ConversationList
-  conversations={conversations}
-  currentConversationId={activeId ?? undefined}
-  onSelectConversation={(conversation) => loadConversation(conversation.id)}
-/>
-          </div>
-        )}
-
-        {showHistory && (
-          <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setShowHistory(false)} />
-        )}
-
-        {showGitHub && (
+        {mobileSettings && (
           <>
-            <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setShowGitHub(false)} />
-            <div className="fixed md:static inset-y-0 right-0 z-40 md:z-auto shadow-xl md:shadow-none">
-              <GitHubSidebar
-                onFilesChange={handleFilesChange}
-                savedContext={active?.githubContext}
-                onClose={() => setShowGitHub(false)}
-              />
+            <div className="fixed inset-0 bg-black/60 z-50 md:hidden" onClick={() => setMobileSettings(false)} />
+            <div className="fixed bottom-0 left-0 right-0 z-50 bg-zinc-900 border-t border-zinc-700 rounded-t-2xl p-5 space-y-4 md:hidden">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-zinc-300 text-sm font-semibold">Settings</span>
+                <button onClick={() => setMobileSettings(false)} className="text-zinc-500 hover:text-zinc-200 text-lg">✕</button>
+              </div>
             </div>
           </>
         )}
 
-        <main className="flex-1 flex flex-col overflow-hidden">
-          {agentStatus && (
-            <div className="px-4 py-2 bg-amber-950 border-b border-amber-900 flex items-center gap-2 flex-shrink-0">
-              <span className="animate-spin text-amber-400 text-xs inline-block">⟳</span>
-              <span className="text-amber-300 text-xs font-mono">{agentStatus}</span>
-            </div>
-          )}
+        <div style={{flex:1,display:"flex",overflow:"hidden"}}>
 
-          {agentPhase === "executing" && !agentStatus && (
-            <div className="px-4 py-2 bg-zinc-900 border-b border-zinc-800 flex items-center gap-2 flex-shrink-0">
-              <span className="animate-spin text-zinc-500 text-xs inline-block">⟳</span>
-              <span className="text-zinc-500 text-xs">Writing files…</span>
-            </div>
-          )}
-
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-            {messages.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center gap-6 text-center">
-                <div>
-                  <div className="text-4xl mb-2">{agentMode ? "⚡" : "⌘"}</div>
-                  <h2 className="text-zinc-200 font-semibold text-lg">
-                    {agentMode ? "Agent mode" : "Your AI coding agent"}
-                  </h2>
-                  <p className="text-zinc-500 text-sm mt-1 max-w-sm">
-                    {agentMode
-                      ? activeRepo
-                        ? "Agent reads your codebase → shows plan → you approve → writes code → you review diffs → push to GitHub."
-                        : "Open the GitHub sidebar and select a repo first."
-                      : "Chats auto-save. Switch to Agent mode to autonomously edit your repo."}
-                  </p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-w-lg w-full px-2 md:px-0">
-                  {(agentMode ? AGENT_PROMPTS : QUICK_PROMPTS).map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => sendMessage(p)}
-                      className="text-left text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 hover:border-zinc-600 hover:text-zinc-200 transition-colors"
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
+          {showGitHub && (
+            <>
+              <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setShowGitHub(false)} />
+              <div className="fixed md:static inset-y-0 right-0 z-40 md:z-auto shadow-xl md:shadow-none">
+                <GitHubSidebar
+                  onFilesChange={handleFilesChange}
+                  savedContext={active?.githubContext}
+                  onClose={() => setShowGitHub(false)}
+                  pinnedFiles={pinnedFiles}
+                  onTogglePinnedFile={togglePinnedFile}
+                />
               </div>
-            ) : (
-              messages.map((msg, i) => (
-                <div key={i}>
-                  {msg.role === "assistant" && routingBadges[i] && (
-                    <div className="flex justify-start mb-1 ml-10">
-                      <span className="text-xs text-amber-400 bg-amber-950 border border-amber-800 rounded-full px-2 py-0.5">
-                        ⚡ {routingBadges[i].reason}
-                      </span>
-                    </div>
-                  )}
-                  <ChatMessage message={msg} activeRepo={activeRepo} />
-                </div>
-              ))
-            )}
+            </>
+          )}
 
-            {loading && messages[messages.length - 1]?.content === "" && (
-              <div className="flex gap-2 text-zinc-500 text-sm ml-10">
-                <span className="animate-pulse">●</span>
-                <span className="animate-pulse" style={{ animationDelay: "0.2s" }}>●</span>
-                <span className="animate-pulse" style={{ animationDelay: "0.4s" }}>●</span>
+          <main style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
+
+            {showSystemPrompt && (
+              <div style={{borderBottom:"1px solid #2d1b69",background:"#130d2e",padding:"12px 16px",flexShrink:0}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px"}}>
+                  <span style={{fontSize:"12px",color:"#a78bfa",fontWeight:500}}>⚙ System prompt — prepended to every message in this conversation</span>
+                  <button onClick={()=>{saveSystemPrompt(systemPrompt);setShowSystemPrompt(false)}} style={{fontSize:"12px",color:"#7c3aed",background:"none",border:"none",cursor:"pointer"}}>Save &amp; close</button>
+                </div>
+                <textarea value={systemPrompt} onChange={e=>setSystemPrompt(e.target.value)} onBlur={()=>saveSystemPrompt(systemPrompt)}
+                  placeholder={`e.g. "This is a React + Supabase project. Always use TypeScript."`}
+                  rows={3}
+                  style={{width:"100%",background:"#0d0d1a",border:"1px solid #4c1d95",borderRadius:"8px",padding:"8px 12px",fontSize:"12px",color:"#e4e4e7",fontFamily:"monospace",resize:"none",outline:"none",boxSizing:"border-box"}}
+                />
               </div>
             )}
-            <div ref={bottomRef} />
-          </div>
 
-          {agentPhase === "awaiting_approval" && currentPlan && (
-            <PlanApproval
-              plan={currentPlan}
-              task={currentTask}
-              onApprove={executePlan}
-              onReject={rejectPlan}
-              executing={false}
-            />
-          )}
+            {showSnippets && (
+              <div style={{borderBottom:"1px solid #78350f",background:"#1c0d02",padding:"12px 16px",flexShrink:0,maxHeight:"200px",overflowY:"auto"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px"}}>
+                  <span style={{fontSize:"12px",color:"#f59e0b",fontWeight:500}}>📎 Snippet library</span>
+                  <button onClick={()=>setShowSnippets(false)} style={{fontSize:"12px",color:"#555",background:"none",border:"none",cursor:"pointer"}}>✕</button>
+                </div>
+                {snippets.length === 0 ? (
+                  <p style={{fontSize:"12px",color:"#555"}}>No snippets yet — use the 💾 button on any code block to save one.</p>
+                ) : (
+                  <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
+                    {snippets.map(s=>(
+                      <div key={s.id} style={{display:"flex",alignItems:"center",gap:"8px",background:"#111",border:"1px solid #222",borderRadius:"7px",padding:"6px 10px"}}>
+                        <span style={{fontSize:"12px",color:"#f59e0b",fontWeight:500,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.label}</span>
+                        <span style={{fontSize:"11px",color:"#555",fontFamily:"monospace"}}>{s.lang}</span>
+                        <button onClick={()=>insertSnippet(s.code)} style={{fontSize:"11px",color:"#14b87a",background:"#0f2e24",border:"1px solid #1D9E75",borderRadius:"4px",padding:"2px 8px",cursor:"pointer"}}>Insert</button>
+                        <button onClick={()=>deleteSnippet(s.id)} style={{fontSize:"11px",color:"#555",background:"none",border:"none",cursor:"pointer"}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.color="#ef4444"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.color="#555"}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
-          {showStagedChanges && (
-            <StagedChanges
-              files={stagedFiles}
-              repo={activeRepo}
-              onPush={async () => {
-                setStagedFiles([]);
-                setAgentPhase("idle");
-                if (currentPlan && activeRepo) {
-                  const branch = (document.querySelector('input[placeholder*="Branch"]') as HTMLInputElement)?.value?.trim();
-                  if (branch) {
-                    const repoRes = await fetch(`/api/github?action=repos`).then(r => r.json()).catch(() => []);
-                    const defaultBranch = (repoRes as { full_name: string; default_branch: string }[])
-                      .find(r => r.full_name === activeRepo)?.default_branch ?? "main";
-                    const prBody = [
-                      `## Summary\n${currentPlan.summary}`,
-                      `## Approach\n${currentPlan.approach}`,
-                      `## Files changed`,
-                      currentPlan.changes.map((c: { action: string; path: string; reason: string }) => `- **${c.action}** \`${c.path}\`: ${c.reason}`).join("\n"),
-                      `---\n*Generated by ORA coding agent*`,
-                    ].join("\n\n");
-                    fetch("/api/github", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        action: "create_pr",
-                        repo: activeRepo,
-                        head: branch,
-                        base: defaultBranch,
-                        title: currentPlan.summary,
-                        body: prBody,
-                      }),
-                    }).then(r => r.json()).then(pr => {
-                      if (pr.url) window.open(pr.url, "_blank");
-                    }).catch(console.error);
+            {agentMode && activeRepo && (
+              <div style={{display:"flex",alignItems:"center",gap:"10px",padding:"6px 16px",borderBottom:"1px solid #1e1e1e",background:"#0d0d0d",flexShrink:0,flexWrap:"wrap"}}>
+                <label style={{display:"flex",alignItems:"center",gap:"6px",cursor:"pointer"}}>
+                  <div onClick={()=>setBranchFirst(v=>!v)}
+                    style={{width:"30px",height:"16px",borderRadius:"8px",background:branchFirst?"#1D9E75":"#2a2a2a",position:"relative",cursor:"pointer",transition:"background .2s"}}>
+                    <div style={{position:"absolute",top:"2px",width:"12px",height:"12px",background:"#fff",borderRadius:"50%",transition:"transform .2s",transform:branchFirst?"translateX(16px)":"translateX(2px)"}} />
+                  </div>
+                  <span style={{fontSize:"12px",color:"#888"}}>Branch-first</span>
+                </label>
+                {branchFirst && agentBranch && (
+                  <span style={{fontSize:"11px",color:"#14b87a",fontFamily:"monospace",background:"#0f2e24",border:"1px solid #1D9E75",borderRadius:"4px",padding:"2px 7px"}}>⑂ {agentBranch}</span>
+                )}
+                {branchFirst && !agentBranch && (
+                  <span style={{fontSize:"11px",color:"#555"}}>Auto-creates feature branch before each run</span>
+                )}
+                {editingProject ? (
+                  <input value={projectInput} onChange={e=>setProjectInput(e.target.value)} onBlur={handleProjectSave}
+                    onKeyDown={e=>{if(e.key==="Enter")handleProjectSave();if(e.key==="Escape")setEditingProject(false)}}
+                    style={{marginLeft:"auto",background:"#1a1a1a",border:"1px solid #14b87a",borderRadius:"5px",padding:"3px 8px",fontSize:"12px",color:"#ccc",outline:"none",width:"120px"}}
+                    autoFocus />
+                ) : (
+                  <button onClick={()=>setEditingProject(true)} style={{marginLeft:"auto",fontSize:"12px",color:"#555",background:"none",border:"1px solid #2a2a2a",borderRadius:"5px",padding:"3px 8px",cursor:"pointer"}}
+                    onMouseEnter={e=>(e.currentTarget as HTMLElement).style.color="#ccc"}
+                    onMouseLeave={e=>(e.currentTarget as HTMLElement).style.color="#555"}>
+                    {active?.project||projectInput||"+ project name"}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {agentStatus && (
+              <div style={{padding:"7px 16px",background:"#1c0f00",borderBottom:"1px solid #78350f",display:"flex",alignItems:"center",gap:"8px",flexShrink:0}}>
+                <span style={{color:"#f59e0b",fontSize:"12px",animation:"spin 1s linear infinite",display:"inline-block"}}>⟳</span>
+                <span style={{color:"#d97706",fontSize:"12px",fontFamily:"monospace"}}>{agentStatus}</span>
+              </div>
+            )}
+            {agentPhase==="executing" && !agentStatus && (
+              <div style={{padding:"7px 16px",background:"#111",borderBottom:"1px solid #1e1e1e",display:"flex",alignItems:"center",gap:"8px",flexShrink:0}}>
+                <span style={{color:"#555",fontSize:"12px"}}>⟳</span>
+                <span style={{color:"#555",fontSize:"12px"}}>Writing files…</span>
+              </div>
+            )}
+
+            <div style={{flex:1,overflowY:"auto",padding:"24px 20px 12px",display:"flex",flexDirection:"column",gap:"20px"}}>
+              {messages.length === 0 ? (
+                <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"20px",textAlign:"center",padding:"40px 20px"}}>
+                  <div>
+                    <div style={{fontSize:"36px",marginBottom:"8px"}}>{agentMode?"⚡":"◈"}</div>
+                    <h2 style={{fontSize:"18px",fontWeight:600,color:"#fff",marginBottom:"6px"}}>
+                      {agentMode ? "ORA Agent" : "ORA Coding Agent"}
+                    </h2>
+                    <p style={{fontSize:"13px",color:"#555",maxWidth:"340px",lineHeight:1.6}}>
+                      {agentMode
+                        ? activeRepo
+                          ? "Describe a task → ORA plans → you approve → code is written → review diffs → push to GitHub."
+                          : "Connect a GitHub repo from the sidebar to start using Agent mode."
+                        : "Ask anything about code. Switch to ⚡ Agent mode to autonomously edit your repo."}
+                    </p>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",width:"100%",maxWidth:"480px"}}>
+                    {(agentMode?AGENT_PROMPTS:QUICK_PROMPTS).map(p=>(
+                      <button key={p} onClick={()=>sendMessage(p)}
+                        style={{textAlign:"left",fontSize:"12px",color:"#666",background:"#141414",border:"1px solid #1e1e1e",borderRadius:"10px",padding:"10px 12px",cursor:"pointer",lineHeight:1.5,transition:"all .15s"}}
+                        onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.borderColor="#14b87a";(e.currentTarget as HTMLElement).style.color="#ccc"}}
+                        onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.borderColor="#1e1e1e";(e.currentTarget as HTMLElement).style.color="#666"}}
+                      >{p}</button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                messages.map((msg,i)=>(
+                  <div key={i}>
+                    {msg.role==="assistant" && routingBadges[i] && (
+                      <div style={{display:"flex",justifyContent:"flex-start",marginBottom:"4px",marginLeft:"36px"}}>
+                        <span style={{fontSize:"11px",color:"#d97706",background:"#1c1206",border:"1px solid #78350f",borderRadius:"20px",padding:"2px 8px"}}>⚡ {routingBadges[i].reason}</span>
+                      </div>
+                    )}
+                    <ChatMessage message={msg} activeRepo={activeRepo} onSaveSnippet={saveSnippet} />
+                  </div>
+                ))
+              )}
+              {loading && messages[messages.length-1]?.content==="" && (
+                <div style={{display:"flex",gap:"6px",color:"#555",marginLeft:"36px"}}>
+                  <span style={{animation:"pulse 1.2s ease-in-out infinite"}}>●</span>
+                  <span style={{animation:"pulse 1.2s ease-in-out infinite",animationDelay:"0.2s"}}>●</span>
+                  <span style={{animation:"pulse 1.2s ease-in-out infinite",animationDelay:"0.4s"}}>●</span>
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </div>
+
+            {agentPhase==="awaiting_approval" && currentPlan && (
+              <PlanApproval plan={currentPlan} task={currentTask} onApprove={executePlan} onReject={rejectPlan} executing={false} />
+            )}
+
+            {showStagedChanges && (
+              <StagedChanges
+                files={stagedFiles}
+                repo={activeRepo}
+                onPush={async()=>{
+                  setStagedFiles([]);setAgentPhase("idle");
+                  if(currentPlan&&activeRepo){
+                    const branch=(document.querySelector('input[placeholder*="Branch"]') as HTMLInputElement)?.value?.trim();
+                    if(branch){
+                      const repoRes=await fetch(`/api/github?action=repos`).then(r=>r.json()).catch(()=>[]);
+                      const defaultBranch=(repoRes as {full_name:string;default_branch:string}[]).find(r=>r.full_name===activeRepo)?.default_branch??"main";
+                      const prBody=[`## Summary\n${currentPlan.summary}`,`## Approach\n${currentPlan.approach}`,`## Files changed`,currentPlan.changes.map((c:{action:string;path:string;reason:string})=>`- **${c.action}** \`${c.path}\`: ${c.reason}`).join("\n"),`---\n*Generated by ORA coding agent*`].join("\n\n");
+                      fetch("/api/github",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"create_pr",repo:activeRepo,head:branch,base:defaultBranch,title:currentPlan.summary,body:prBody})}).then(r=>r.json()).then(pr=>{if(pr.url)window.open(pr.url,"_blank")}).catch(console.error);
+                    }
                   }
-                }
-              }}
-              onDiscard={() => { setStagedFiles([]); setAgentPhase("idle"); }}
-            />
-          )}
-
-          <div className="border-t border-zinc-800 px-3 md:px-4 py-3 pb-safe flex-shrink-0 bg-zinc-950">
-            {agentMode && !activeRepo && (
-              <p className="text-amber-500 text-xs mb-2 text-center">
-                ⚠ Select a GitHub repo from the sidebar before using Agent mode
-              </p>
-            )}
-            <LocalFileContext
-              onFilesLoaded={(files) => {
-                setLocalFiles(files);
-                setInjectedFiles((prev) => {
-                  const localPaths = new Set(files.map((f) => f.path));
-                  return [...prev.filter((f) => !localPaths.has(f.path)), ...files];
-                });
-              }}
-            />
-            <div className="flex gap-3 items-end max-w-4xl mx-auto">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={
-                  agentPhase === "awaiting_approval"
-                    ? "Approve or reject the plan above first…"
-                    : agentMode && activeRepo
-                    ? `Describe a task for ${activeRepo.split("/")[1]}…`
-                    : agentMode
-                    ? "Select a repo first…"
-                    : isAuto
-                    ? "Ask anything — Auto picks the best model…"
-                    : "Ask the coding agent… (Shift+Enter for newline)"
-                }
-                disabled={inputDisabled}
-                rows={2}
-                className={`flex-1 bg-zinc-800 border rounded-xl px-4 py-3 text-zinc-100 text-sm resize-none focus:outline-none placeholder:text-zinc-600 disabled:opacity-50 ${
-                  agentMode ? "border-teal-800 focus:border-teal-600" : "border-zinc-700 focus:border-teal-600"
-                }`}
+                }}
+                onDiscard={()=>{setStagedFiles([]);setAgentPhase("idle")}}
               />
-              <button
-                onClick={() => sendMessage()}
-                disabled={inputDisabled || !input.trim() || isAgentBusy}
-                className="bg-teal-700 hover:bg-teal-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl px-4 py-3 text-sm font-medium transition-colors flex-shrink-0"
-              >
-                {loading ? "…" : agentMode ? "Run" : "Send"}
-              </button>
+            )}
+
+            <div style={{borderTop:"1px solid #1e1e1e",padding:"10px 16px 14px",background:"#111",flexShrink:0}}>
+              {agentMode&&!activeRepo&&(
+                <p style={{fontSize:"12px",color:"#d97706",textAlign:"center",marginBottom:"8px"}}>⚠ Connect a GitHub repo from the sidebar to use Agent mode</p>
+              )}
+              <div style={{display:"flex",gap:"6px",marginBottom:"8px",flexWrap:"wrap",alignItems:"center"}}>
+                <LocalFileContext onFilesLoaded={files=>{setLocalFiles(files);setInjectedFiles(prev=>{const lp=new Set(files.map(f=>f.path));return[...prev.filter(f=>!lp.has(f.path)),...files]})}} />
+                {agentMode&&activeRepo&&(
+                  <button onClick={()=>setBranchFirst(v=>!v)}
+                    style={{display:"flex",alignItems:"center",gap:"4px",fontSize:"11px",color:branchFirst?"#14b87a":"#555",background:branchFirst?"#0f2e24":"#1a1a1a",border:`1px solid ${branchFirst?"#1D9E75":"#2a2a2a"}`,borderRadius:"5px",padding:"3px 8px",cursor:"pointer"}}>
+                    ⑂ branch-first
+                  </button>
+                )}
+                <span style={{marginLeft:"auto",fontSize:"11px",color:"#333",fontFamily:"monospace"}}>⌘? for shortcuts</span>
+              </div>
+              <div style={{display:"flex",gap:"8px",alignItems:"flex-end"}}>
+                <textarea
+                  value={input}
+                  onChange={e=>setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={
+                    agentPhase==="awaiting_approval" ? "Approve or reject the plan above first…"
+                    : agentMode&&activeRepo ? `Describe a task for ${activeRepo.split("/")[1]}…`
+                    : agentMode ? "Connect a GitHub repo first…"
+                    : isAuto ? "Ask ORA anything — Auto picks the best model…"
+                    : "Ask ORA… (Shift+Enter for newline)"
+                  }
+                  disabled={inputDisabled}
+                  rows={2}
+                  style={{flex:1,background:"#1a1a1a",border:`1px solid ${agentMode?"#1D9E75":"#2a2a2a"}`,borderRadius:"10px",padding:"10px 14px",fontSize:"13px",color:"#e4e4e7",resize:"none",outline:"none",fontFamily:"inherit",lineHeight:1.5,transition:"border-color .2s",opacity:inputDisabled?0.5:1}}
+                  onFocus={e=>(e.currentTarget as HTMLElement).style.borderColor=agentMode?"#14b87a":"#3f3f46"}
+                  onBlur={e=>(e.currentTarget as HTMLElement).style.borderColor=agentMode?"#1D9E75":"#2a2a2a"}
+                />
+                <button
+                  onClick={()=>sendMessage()}
+                  disabled={inputDisabled||!input.trim()||isAgentBusy}
+                  style={{width:"42px",height:"42px",borderRadius:"10px",background:inputDisabled||!input.trim()||isAgentBusy?"#1a1a1a":"#14b87a",border:"none",cursor:inputDisabled||!input.trim()||isAgentBusy?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"18px",color:inputDisabled||!input.trim()||isAgentBusy?"#333":"#000",flexShrink:0,transition:"all .15s"}}
+                >
+                  {loading?"…":"↑"}
+                </button>
+              </div>
             </div>
-          </div>
-        </main>
+          </main>
+        </div>
       </div>
+
+      <style>{`
+        .conv-del-btn { opacity: 0 !important; transition: opacity .15s; }
+        div:hover > .conv-del-btn { opacity: 1 !important; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }
+        * { scrollbar-width: thin; scrollbar-color: #2a2a2a transparent; }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
+        select option { background: #1a1a1a; color: #ccc; }
+      `}</style>
 
       <ShortcutHelpModal open={showHelp} onClose={() => setShowHelp(false)} />
     </div>

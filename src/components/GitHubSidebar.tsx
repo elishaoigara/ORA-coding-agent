@@ -7,6 +7,8 @@ interface Props {
   onFilesChange: (files: InjectedFile[], repo: string) => void;
   savedContext?: GitHubContext; // restored from conversation
   onClose?: () => void;        // called by the mobile close button
+  pinnedFiles?: Record<string, string[]>;  // ADD THIS
+  onTogglePinnedFile?: (repo: string, filePath: string) => void;  // ADD THIS
 }
 
 const MODEL_LIMIT = 128000;
@@ -36,7 +38,7 @@ function TokenBar({ tokens }: { tokens: number }) {
   );
 }
 
-export default function GitHubSidebar({ onFilesChange, savedContext, onClose }: Props) {
+export default function GitHubSidebar({ onFilesChange, savedContext, onClose, pinnedFiles, onTogglePinnedFile }: Props) {
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const [path, setPath] = useState("");
