@@ -192,7 +192,7 @@ export default function StagedChanges({ files, repo, onPush, onDiscard }: Props)
 
       {/* Push controls */}
       {!pushResult?.success && (
-        <div className="px-4 py-3 border-t border-zinc-800 flex items-center gap-3 flex-wrap">
+        <div className="px-3 py-3 border-t border-zinc-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 flex-wrap">
           <input
             value={commitMsg}
             onChange={(e) => setCommitMsg(e.target.value)}

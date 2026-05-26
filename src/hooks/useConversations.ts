@@ -40,7 +40,8 @@ export function useConversations() {
     setConversations(local);
     gistIdRef.current = localStorage.getItem(LS_GIST_KEY) ?? null;
     setSyncing(true);
-    fetch("/api/conversations")
+    const qs = gistIdRef.current ? `?gistId=${gistIdRef.current}` : "";
+fetch(`/api/conversations${qs}`)
       .then((r) => r.json())
       .then(({ conversations: remote, gistId }) => {
         if (gistId) { gistIdRef.current = gistId; localStorage.setItem(LS_GIST_KEY, gistId); }

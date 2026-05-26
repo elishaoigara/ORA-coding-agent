@@ -260,7 +260,7 @@ export default function ChatMessage({ message, activeRepo, onSaveSnippet }: Prop
           </div>
         )}
 
-        <div className="max-w-[82%] flex flex-col gap-1">
+        <div className="max-w-[92%] md:max-w-[82%] flex flex-col gap-1">
           <div className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${
             isUser
               ? "bg-zinc-700 text-zinc-100 rounded-br-none"
