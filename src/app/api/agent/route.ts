@@ -5,18 +5,10 @@ import { AGENT_TOOLS, type StagedFile } from "@/lib/agentTools";
 export const maxDuration = 300;
 
 const GH_BASE = "https://api.github.com";
-const MAX_ITERATIONS_PER_CALL = 15;  // was 8 — raised to handle larger plans
-const MAX_TOKENS = 32000;            // was 16000 — raised to reduce finish_reason=length
+const MAX_ITERATIONS_PER_CALL = 15;
+const MAX_TOKENS = 32000;
 
-// ── Timeout budget ────────────────────────────────────────────────────────────
-// Vercel Hobby: 60 s hard limit. Vercel Pro: 300 s.
-// We emit a "continue" event before the platform kills us so the frontend can
-// resume in a fresh request. Set AGENT_WATCHDOG_MS in your environment:
-//   Hobby  → 45000  (45 s — leaves 15 s buffer before the 60 s cut-off)
-//   Pro    → 240000 (4 min — leaves 1 min buffer before the 5 min cut-off)
 const REQUEST_BUDGET_MS  = parseInt(process.env.AGENT_WATCHDOG_MS ?? "45000", 10);
-// Per-LLM-call abort timeout — if a single call hangs longer than this we abort
-// it and either emit "continue" (mid-task) or "error" (planning phase).
 const PER_CALL_TIMEOUT_MS = Math.min(40_000, REQUEST_BUDGET_MS - 5_000);
 
 // ── Phase 1: Plan ─────────────────────────────────────────────────────────────
@@ -220,7 +212,6 @@ function isQwenProvider(baseUrl: string): boolean {
   return baseUrl.includes("dashscope") || baseUrl.includes("aliyun");
 }
 
-/** Only actual Qwen/QwQ/QVQ models support enable_thinking — not DeepSeek via Dashscope */
 function isQwenModel(model: string): boolean {
   return /^(qwen|qwq|qvq)/i.test(model);
 }
@@ -254,8 +245,6 @@ function buildRequestBody(params: {
     model: params.model,
     messages: params.messages,
     tools: params.tools,
-    // "none" forces a plain-text response (no more tool calls) — passed in when
-    // all files are already staged so the model just writes the final summary.
     tool_choice: params.forceText ? "none" : "auto",
     max_tokens: MAX_TOKENS,
     temperature: 0.2,
@@ -278,7 +267,6 @@ export async function POST(req: NextRequest) {
     model?: string;
     phase: "plan" | "execute";
     plan?: AgentPlan;
-    // Resume support: frontend passes these back after a mid-execution continuation
     resumeMessages?: unknown[];
     resumeStagedFiles?: StagedFile[];
   };
@@ -310,11 +298,9 @@ export async function POST(req: NextRequest) {
     )
   );
 
-  // Restore state from a previous interrupted call if resuming
   const stagedFiles: StagedFile[] = resumeStagedFiles ? [...resumeStagedFiles] : [];
   const encoder = new TextEncoder();
 
-  /** Returns true when every non-delete change in the plan has been staged */
   function allFilesStaged(): boolean {
     if (!plan) return false;
     return plan.changes
@@ -347,13 +333,11 @@ export async function POST(req: NextRequest) {
       let consecutiveEmptyResponses = 0;
       const requestStart = Date.now();
 
-      /** True when we are close to the platform timeout and must hand off to the frontend */
       function nearBudget(): boolean {
         return Date.now() - requestStart >= REQUEST_BUDGET_MS;
       }
 
       while (iterations < MAX_ITERATIONS_PER_CALL) {
-        // ── Watchdog: emit "continue" before Vercel kills the connection ──────
         if (nearBudget()) {
           const missing = plan?.changes
             .filter((c) => c.action !== "delete" && !stagedFiles.some((f) => f.path === c.path))
@@ -376,25 +360,19 @@ export async function POST(req: NextRequest) {
             controller.close();
             return;
           }
-          // Planning phase or nothing staged — just end gracefully
           break;
         }
-        // ─────────────────────────────────────────────────────────────────────
 
         iterations++;
 
         let llmResponse;
         try {
-          // When every planned file is already staged, force a text-only response
-          // so the model writes the summary instead of calling more tools.
           const forceText = phase === "execute" && allFilesStaged();
 
-          // Per-call abort — prevents a single slow LLM response from eating the
-          // whole request budget and leaving no time to emit a "continue" event.
           const fetchAbort   = new AbortController();
           const fetchTimeout = setTimeout(() => fetchAbort.abort(), PER_CALL_TIMEOUT_MS);
 
-          let res!: Response; // definite assignment — outer catch handles throw from inner try/finally
+          let res!: Response;
           try {
             res = await fetch(`${provider.baseUrl}/chat/completions`, {
               method: "POST",
@@ -418,23 +396,35 @@ export async function POST(req: NextRequest) {
             const errText = await res.text();
 
             // ── Groq/LLaMA XML tool-call fallback ──────────────────────────
-            // LLaMA models on Groq sometimes emit tool calls in the old XML
-            // format: <function=tool_name>{"arg":"val"}</function>
-            // Groq rejects these with 400 tool_use_failed. Parse and execute
+            // LLaMA models on Groq emit tool calls in XML instead of JSON.
+            // Two known variants:
+            //   Format 1: <function=name>{"args"}</function>
+            //   Format 2: <function=name\n{"args"}></c/function>  ← LLaMA 3.3 70B
+            // Groq rejects both with 400 tool_use_failed. Parse and execute
             // them ourselves so the agent loop continues uninterrupted.
             try {
               const errJson = JSON.parse(errText);
               if (errJson.error?.code === "tool_use_failed") {
                 const failedGen: string = errJson.error?.failed_generation ?? "";
-                const xmlRe = /<function=(\w+)>([\s\S]*?)<\/function>/g;
+
+                const xmlRe  = /<function=(\w+)>([\s\S]*?)<\/function>/g;
+                const xmlRe2 = /<function=(\w+)\n({[\s\S]*?})>(?:<\/c\/function>|<\/function>)/g;
+
                 let xmlMatch: RegExpExecArray | null;
                 let recovered = false;
                 const syntheticToolCalls: {id: string; type: string; function: {name: string; arguments: string}}[] = [];
                 const toolResults: {id: string; content: string}[] = [];
 
+                // Collect all matches from both format variants
+                const allMatches: [string, string][] = [];
                 while ((xmlMatch = xmlRe.exec(failedGen)) !== null) {
-                  const toolName = xmlMatch[1];
-                  const rawArgs  = xmlMatch[2].trim();
+                  allMatches.push([xmlMatch[1], xmlMatch[2].trim()]);
+                }
+                while ((xmlMatch = xmlRe2.exec(failedGen)) !== null) {
+                  allMatches.push([xmlMatch[1], xmlMatch[2].trim()]);
+                }
+
+                for (const [toolName, rawArgs] of allMatches) {
                   let args: Record<string, string> = {};
                   try { args = JSON.parse(rawArgs || "{}"); } catch { /* no args */ }
 
@@ -467,8 +457,6 @@ export async function POST(req: NextRequest) {
           llmResponse = await res.json();
         } catch (e) {
           const err = e as Error;
-          // AbortError means PER_CALL_TIMEOUT_MS was exceeded — treat it like
-          // hitting the watchdog: emit "continue" for execute phase, error for plan.
           if (err.name === "AbortError") {
             if (phase === "execute" && stagedFiles.length > 0) {
               const prunedAbort = messages.map((m: Record<string, unknown>) => {
@@ -504,7 +492,6 @@ export async function POST(req: NextRequest) {
         const assistantMsg = choice.message;
         messages.push(assistantMsg);
 
-        // ── Detect finish_reason=length (truncation) ───────────────────────
         if (choice.finish_reason === "length") {
           send("progress", { text: "⚠️ Response was cut off — continuing…" });
           messages.push({
@@ -514,17 +501,12 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        // ── Tool calls ──────────────────────────────────────────────────────
-        // Guard: some providers (Groq) return tool_calls:[] (empty) on failure —
-        // treat that the same as no tool calls to avoid misfire.
         const hasToolCalls = Array.isArray(assistantMsg.tool_calls) && assistantMsg.tool_calls.length > 0;
 
         if (hasToolCalls) {
           consecutiveEmptyResponses = 0;
           for (const toolCall of assistantMsg.tool_calls) {
             const toolName = toolCall.function?.name ?? "unknown";
-            // Groq sometimes omits the id field — generate a fallback so the
-            // tool result message is always well-formed.
             const toolId = toolCall.id ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
             let args: Record<string, string> = {};
             try { args = JSON.parse(toolCall.function?.arguments ?? "{}"); } catch { /* empty */ }
@@ -538,14 +520,12 @@ export async function POST(req: NextRequest) {
             send("tool_call", { text: labels[toolName] ?? `Calling ${toolName}…` });
 
             const result = await executeTool(toolName, args, repo, stagedFiles);
-            // Use the normalised toolId in both the assistant message and the tool result
             toolCall.id = toolId;
             messages.push({ role: "tool", tool_call_id: toolId, content: result });
           }
           continue;
         }
 
-        // ── Final text response ─────────────────────────────────────────────
         const rawText: string = (assistantMsg.content ?? "").trim();
 
         if (!rawText) {
@@ -559,7 +539,6 @@ export async function POST(req: NextRequest) {
           const planMatch = rawText.match(/<PLAN>([\s\S]*?)<\/PLAN>/);
           const textWithoutPlan = rawText.replace(/<PLAN>[\s\S]*?<\/PLAN>/g, "").trim();
 
-          // Only stream analysis text once — if we're on a retry (no new text), skip it
           if (textWithoutPlan && !textWasSent) {
             await streamText(textWithoutPlan, send);
             textWasSent = true;
@@ -580,7 +559,6 @@ export async function POST(req: NextRequest) {
             continue;
           }
         } else {
-          // Execute phase — check if all planned files were staged
           const missingPaths = plan?.changes
             .filter((c) => c.action !== "delete" && !stagedFiles.some((f) => f.path === c.path))
             .map((c) => `- ${c.path}`)
@@ -595,10 +573,6 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          // If there are still missing files after we've hit our per-call limit,
-          // emit a "continue" event so the frontend can resume in a new request.
-          // NOTE: do NOT gate on textWasSent — missing files always need continuation
-          // regardless of whether the model wrote a partial summary.
           if (missingPaths) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const prunedMsgs = messages.map((m: any) => {
@@ -629,23 +603,17 @@ export async function POST(req: NextRequest) {
         break;
       }
 
-      // ── Hit iteration cap mid-task — tell frontend to resume ───────────
       const missingAfterLoop = plan?.changes
         .filter((c) => c.action !== "delete" && !stagedFiles.some((f) => f.path === c.path))
         .map((c) => `- ${c.path}`)
         .join("\n");
 
-      // Always emit "continue" when files are still missing — do NOT gate on textWasSent
       if (phase === "execute" && missingAfterLoop) {
-        // Prune large read_file / stage_file tool results from the history so the
-        // continuation payload stays well under Vercel's 4 MB request body limit.
-        // We keep the skeleton (tool name + path) but drop the file content.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const prunedMessages = messages.map((m: any) => {
           if (m.role !== "tool") return m;
           try {
             const parsed = JSON.parse(m.content ?? "{}");
-            // If the tool result contains file content, replace it with a size note
             if (typeof parsed.content === "string" && parsed.content.length > 500) {
               return { ...m, content: JSON.stringify({ ...parsed, content: `[pruned — ${parsed.lines ?? "?"} lines]` }) };
             }
@@ -662,7 +630,6 @@ export async function POST(req: NextRequest) {
         return;
       }
 
-      // ── Fallback message if agent produced no text ──────────────────────
       if (!textWasSent) {
         if (phase === "execute" && stagedFiles.length > 0) {
           const summary = [
