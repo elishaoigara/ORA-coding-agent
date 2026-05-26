@@ -233,6 +233,10 @@ function llmHeaders(apiKey: string, baseUrl: string): Record<string, string> {
   if (baseUrl.includes("anthropic.com")) {
     headers["anthropic-version"] = "2023-06-01";
   }
+  if (baseUrl.includes("openrouter.ai")) {
+    headers["HTTP-Referer"] = "https://github.com/ORA-coding-agent";
+    headers["X-Title"] = "ORA Coding Agent";
+  }
   return headers;
 }
 
