@@ -45,10 +45,14 @@ const PROVIDERS: Record<Exclude<ProviderId, "auto">, ProviderConfig> = {
     name: "DeepSeek",
     baseUrl: "https://api.deepseek.com/v1",
     apiKey: process.env.DEEPSEEK_API_KEY ?? "",
-    defaultModel: "deepseek-chat",
+    defaultModel: "deepseek-v4-flash",
     models: [
-      { id: "deepseek-chat",     label: "DeepSeek V3 (Chat)" },
-      { id: "deepseek-reasoner", label: "DeepSeek R1 (Reasoner)" },
+      // ── Current models ────────────────────────────────────────────────
+      { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash ★ (Chat)" },
+      { id: "deepseek-v4-pro",   label: "DeepSeek V4 Pro (Reasoner)" },
+      // ── Legacy aliases (deprecated 2026/07/24) ────────────────────────
+      { id: "deepseek-chat",     label: "DeepSeek V3 Chat (deprecated)" },
+      { id: "deepseek-reasoner", label: "DeepSeek R1 Reasoner (deprecated)" },
     ],
   },
   qwen: {
