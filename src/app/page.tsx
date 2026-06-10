@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import GitHubSidebar from "@/components/GitHubSidebar";
 import ChatMessage from "@/components/ChatMessage";
 import ConversationList from "@/components/ConversationList";
@@ -82,6 +82,16 @@ export default function Home() {
   });
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
 
   const {
     conversations, active, activeId, syncing,
@@ -604,407 +614,398 @@ export default function Home() {
   const inputDisabled     = loading || (agentMode && !activeRepo) || agentPhase === "awaiting_approval";
   const showStagedChanges = stagedFiles.length > 0 && agentPhase !== "awaiting_approval";
 
+  // ── Mobile menu handlers ──────────────────────────────────────────────────
+  const closeAllMobileMenus = useCallback(() => {
+    setShowHistory(false);
+    setShowGitHub(false);
+    setMobileSettings(false);
+    setShowSystemPrompt(false);
+    setShowSnippets(false);
+  }, []);
+
+  // Close mobile menus on conversation switch
+  useEffect(() => {
+    closeAllMobileMenus();
+  }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <div className="h-screen flex overflow-hidden" style={{background:"#0a0a0a",color:"#e4e4e7"}}>
+    <div className="flex h-dvh bg-zinc-950 overflow-hidden">
+      {/* ── Mobile overlay ───────────────────────────────────────────────── */}
+      {(showHistory || showGitHub || mobileSettings || showSystemPrompt || showSnippets) && (
+        <div
+          className="mobile-overlay md:hidden"
+          onClick={closeAllMobileMenus}
+        />
+      )}
 
-      {/* ── LEFT SIDEBAR ─────────────────────────────────────────────── */}
-      <aside style={{width:"240px",borderRight:"1px solid #1e1e1e",background:"#111",display:"flex",flexDirection:"column",flexShrink:0}}>
-
-        <div style={{padding:"14px 12px 10px",borderBottom:"1px solid #1e1e1e"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"10px"}}>
-            <div style={{display:"flex",alignItems:"center",gap:"7px"}}>
-              <div style={{width:"26px",height:"26px",borderRadius:"6px",background:"linear-gradient(135deg,#14b87a,#0f6e56)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",fontWeight:700,color:"#fff",letterSpacing:"-0.5px"}}>O</div>
-              <div>
-                <span style={{fontSize:"13px",fontWeight:600,color:"#fff",letterSpacing:"-0.3px"}}>ORA</span>
-                <span style={{fontSize:"10px",color:"#555",marginLeft:"5px"}}>coding agent</span>
-              </div>
-            </div>
-            {syncing && <span style={{fontSize:"10px",color:"#555"}} title="Syncing…">↻</span>}
-          </div>
-          <button
-            onClick={handleNewChat}
-            style={{width:"100%",display:"flex",alignItems:"center",gap:"7px",background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"8px",padding:"8px 10px",color:"#ccc",fontSize:"12px",cursor:"pointer",transition:"all .15s"}}
-            onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.borderColor="#14b87a";(e.currentTarget as HTMLElement).style.color="#fff"}}
-            onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.borderColor="#2a2a2a";(e.currentTarget as HTMLElement).style.color="#ccc"}}
-          >
-            <span style={{fontSize:"16px",color:"#14b87a",lineHeight:1}}>＋</span>
-            <span>New chat</span>
-            <span style={{marginLeft:"auto",fontSize:"10px",color:"#444",fontFamily:"monospace",background:"#222",border:"1px solid #333",borderRadius:"3px",padding:"1px 4px"}}>⌘K</span>
-          </button>
-        </div>
-
-        <div style={{padding:"10px 12px 6px",position:"relative"}}>
-          <span style={{position:"absolute",left:"22px",top:"50%",transform:"translateY(-50%)",fontSize:"13px",color:"#444",pointerEvents:"none"}}>🔍</span>
-          <input
-            value={searchQuery}
-            onChange={e=>setSearchQuery(e.target.value)}
-            placeholder="Search chats…"
-            style={{width:"100%",background:"#1a1a1a",border:"1px solid #222",borderRadius:"7px",padding:"6px 8px 6px 28px",fontSize:"12px",color:"#ccc",outline:"none",boxSizing:"border-box"}}
-          />
-        </div>
-
-        <div style={{flex:1,overflowY:"auto",padding:"0 8px 8px"}}>
-          <div style={{fontSize:"10px",color:"#444",textTransform:"uppercase",letterSpacing:".08em",padding:"6px 4px 4px"}}>Recent</div>
-          {conversations.length === 0 && (
-            <div style={{fontSize:"12px",color:"#444",textAlign:"center",padding:"20px 8px"}}>No chats yet</div>
-          )}
-          {conversations
-            .filter(c => !searchQuery.trim() || c.title.toLowerCase().includes(searchQuery.toLowerCase()) || c.project?.toLowerCase().includes(searchQuery.toLowerCase()) || c.messages.some(m=>m.content.toLowerCase().includes(searchQuery.toLowerCase())))
-            .map((conv) => (
-              <div
-                key={conv.id}
-                onClick={() => loadConversation(conv.id)}
-                style={{
-                  display:"flex",alignItems:"center",gap:"8px",padding:"7px 8px",borderRadius:"7px",cursor:"pointer",marginBottom:"2px",
-                  background: activeId === conv.id ? "#0f2e24" : "transparent",
-                  border: activeId === conv.id ? "1px solid #1D9E75" : "1px solid transparent",
-                  transition:"all .1s",
-                }}
-                onMouseEnter={e=>{if(activeId!==conv.id)(e.currentTarget as HTMLElement).style.background="#1a1a1a"}}
-                onMouseLeave={e=>{if(activeId!==conv.id)(e.currentTarget as HTMLElement).style.background="transparent"}}
-              >
-                <div style={{width:"6px",height:"6px",borderRadius:"50%",background: activeId===conv.id ? "#14b87a" : "#2a2a2a",flexShrink:0}} />
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:"12px",color: activeId===conv.id ? "#fff" : "#ccc",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{conv.title}</div>
-                  <div style={{fontSize:"10px",color:"#555",marginTop:"1px"}}>
-                    {conv.project && <span style={{color:"#14b87a",marginRight:"4px"}}>{conv.project}</span>}
-                    {new Date(conv.updatedAt).toLocaleDateString()}
-                    {conv.systemPrompt && <span style={{marginLeft:"4px",color:"#8b5cf6"}} title="Has system prompt">⚙</span>}
-                  </div>
-                </div>
-                <button
-                  onClick={e=>{e.stopPropagation();deleteConversation(conv.id)}}
-                  style={{opacity:0,fontSize:"11px",color:"#555",background:"none",border:"none",cursor:"pointer",padding:"2px",borderRadius:"3px",flexShrink:0}}
-                  onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color="#ef4444"}}
-                  onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color="#555"}}
-                  className="conv-del-btn"
-                  title="Delete"
-                >✕</button>
-              </div>
-            ))}
-        </div>
-
-        <div style={{borderTop:"1px solid #1e1e1e",margin:"0 12px"}} />
-
-        <div style={{padding:"10px 12px 12px"}}>
-          <div style={{fontSize:"10px",color:"#444",textTransform:"uppercase",letterSpacing:".08em",marginBottom:"7px"}}>Context</div>
-          {activeRepo ? (
-            <>
-              <div style={{display:"flex",alignItems:"center",gap:"6px",background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"7px",padding:"6px 8px",marginBottom:"5px",cursor:"pointer"}}
-                onClick={()=>setShowGitHub(v=>!v)}>
-                <span style={{fontSize:"13px"}}>⑂</span>
-                <span style={{fontSize:"12px",color:"#ccc",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{activeRepo.split("/")[1]}</span>
-                <span style={{fontSize:"10px",background:"#0f2e24",color:"#14b87a",border:"1px solid #1D9E75",borderRadius:"4px",padding:"1px 5px"}}>main</span>
-              </div>
-              {(pinnedFiles[activeRepo]??[]).slice(0,3).map(f=>(
-                <div key={f} style={{display:"flex",alignItems:"center",gap:"5px",padding:"4px 8px",marginBottom:"2px",background:"#161616",border:"1px solid #1e1e1e",borderRadius:"5px"}}>
-                  <span style={{fontSize:"11px",color:"#EF9F27"}}>📌</span>
-                  <span style={{fontSize:"11px",color:"#888",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{f.split("/").pop()}</span>
-                </div>
-              ))}
-              {injectedFiles.length > 0 && !(pinnedFiles[activeRepo]??[]).length && (
-                <div style={{fontSize:"11px",color:"#14b87a",padding:"3px 4px"}}>📎 {injectedFiles.length} file{injectedFiles.length>1?"s":""} in context</div>
-              )}
-            </>
-          ) : (
-            <button onClick={()=>setShowGitHub(true)} style={{width:"100%",background:"#1a1a1a",border:"1px dashed #2a2a2a",borderRadius:"7px",padding:"8px",fontSize:"12px",color:"#555",cursor:"pointer",transition:"all .15s"}}
-              onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.borderColor="#14b87a";(e.currentTarget as HTMLElement).style.color="#ccc"}}
-              onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.borderColor="#2a2a2a";(e.currentTarget as HTMLElement).style.color="#555"}}
+      {/* ── History sidebar (mobile: overlay) ────────────────────────────── */}
+      <div className={`
+        ${isMobile ? 'fixed inset-y-0 left-0 z-50 w-[85vw] max-w-[360px] bg-zinc-900 border-r border-zinc-800 transform transition-transform duration-300 ease-in-out' : 'w-64 border-r border-zinc-800 flex-shrink-0 hidden md:flex'}
+        ${isMobile && !showHistory ? '-translate-x-full' : 'translate-x-0'}
+        flex flex-col
+      `}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+          <h2 className="text-zinc-200 text-sm font-semibold">History</h2>
+          {isMobile && (
+            <button
+              onClick={() => setShowHistory(false)}
+              className="text-zinc-500 hover:text-zinc-300 p-2 touch-target"
+              aria-label="Close history"
             >
-              + Connect GitHub repo
+              ✕
             </button>
           )}
         </div>
-      </aside>
+        <ConversationList
+          conversations={conversations}
+          onSelectConversation={(conv) => {
+            loadConversation(conv.id);
+            if (isMobile) setShowHistory(false);
+          }}
+          onDeleteConversation={deleteConversation}
+          currentConversationId={activeId ?? undefined}
+        />
+      </div>
 
-      {/* ── MAIN AREA ────────────────────────────────────────────────── */}
-      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
+      {/* ── Main chat area ───────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* ── Top bar ────────────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-900/80 backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            {/* Mobile menu buttons */}
+            <button
+              onClick={() => setShowHistory(true)}
+              className="md:hidden p-2 text-zinc-400 hover:text-zinc-200 touch-target"
+              aria-label="Open history"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
 
-        <header style={{height:"48px",display:"flex",alignItems:"center",gap:"10px",padding:"0 16px",borderBottom:"1px solid #1e1e1e",background:"#111",flexShrink:0}}>
-          <div style={{display:"flex",background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"8px",padding:"2px",gap:"2px"}}>
-            <button
-              onClick={()=>{setAgentMode(false);setCurrentPlan(null);setAgentPhase("idle")}}
-              style={{fontSize:"12px",padding:"4px 12px",borderRadius:"6px",border:"none",cursor:"pointer",background:!agentMode?"#2a2a2a":"transparent",color:!agentMode?"#fff":"#666",fontWeight:!agentMode?500:400,transition:"all .15s"}}
-            >Chat</button>
-            <button
-              onClick={()=>setAgentMode(true)}
-              style={{fontSize:"12px",padding:"4px 12px",borderRadius:"6px",border:"none",cursor:"pointer",background:agentMode?"#0f2e24":"transparent",color:agentMode?"#14b87a":"#666",fontWeight:agentMode?500:400,transition:"all .15s"}}
-            >⚡ Agent</button>
+            <span className="text-zinc-300 text-sm font-medium truncate max-w-[120px] md:max-w-[200px]">
+              {active?.title || "New chat"}
+            </span>
+            {syncing && <span className="text-zinc-600 text-xs animate-pulse">⟳</span>}
           </div>
 
-          <select value={selectedProviderId} onChange={e=>handleProviderChange(e.target.value)}
-            style={{background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"7px",color:"#aaa",fontSize:"12px",padding:"4px 8px",outline:"none",cursor:"pointer"}}>
-            <option value="auto">⚡ Auto</option>
-            <option disabled>──────</option>
-            {providers.map(p=><option key={p.id} value={p.id} disabled={!p.configured}>{p.name}{!p.configured?" (no key)":""}</option>)}
-          </select>
-          {!isAuto && activeProvider && (
-            <select value={selectedModel} onChange={e=>setSelectedModel(e.target.value)}
-              style={{background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"7px",color:"#aaa",fontSize:"12px",padding:"4px 8px",outline:"none",cursor:"pointer"}}>
-              {(activeProvider?.models??[]).map(m=><option key={m.id} value={m.id}>{m.label}</option>)}
-            </select>
-          )}
-          {isAuto && <span style={{fontSize:"11px",color:"#d97706",background:"#1c1206",border:"1px solid #78350f",borderRadius:"20px",padding:"2px 8px"}}>picks best model</span>}
+          <div className="flex items-center gap-1">
+            {/* Agent mode toggle */}
+            <button
+              onClick={() => setAgentMode((v) => !v)}
+              className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-colors touch-target ${
+                agentMode
+                  ? "bg-purple-700 text-purple-100"
+                  : "text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              {agentMode ? "🤖 Agent" : "💬 Chat"}
+            </button>
 
-          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:"8px"}}>
-            {convUsage && convUsage.totalTokens > 0 && (
-              <span style={{fontSize:"11px",color:"#444",fontFamily:"monospace"}}>{formatTokens(convUsage.totalTokens)} · {formatCost(convUsage.estimatedCostUsd)}</span>
-            )}
-            <button onClick={()=>setShowSystemPrompt(v=>!v)}
-              style={{fontSize:"12px",padding:"4px 10px",background:systemPrompt.trim()?"#1e0a3c":"#1a1a1a",border:`1px solid ${systemPrompt.trim()?"#6d28d9":"#2a2a2a"}`,borderRadius:"7px",color:systemPrompt.trim()?"#a78bfa":"#666",cursor:"pointer"}}
-              title="System prompt">⚙ prompt</button>
-            <button onClick={()=>setShowSnippets(v=>!v)}
-              style={{fontSize:"12px",padding:"4px 10px",background:"#1a1a1a",border:`1px solid ${showSnippets?"#b45309":"#2a2a2a"}`,borderRadius:"7px",color:showSnippets?"#f59e0b":"#666",cursor:"pointer"}}
-              title="Snippet library">📎 {snippets.length>0?`${snippets.length} snips`:"snippets"}</button>
-            <button onClick={exportMarkdown} disabled={messages.length===0}
-              style={{fontSize:"12px",padding:"4px 10px",background:"#1a1a1a",border:"1px solid #2a2a2a",borderRadius:"7px",color:messages.length>0?"#666":"#333",cursor:messages.length>0?"pointer":"default"}}
-              title="Export as Markdown">↓ .md</button>
-            <button onClick={()=>setShowGitHub(s=>!s)}
-              style={{fontSize:"12px",padding:"4px 10px",background:showGitHub?"#0f2e24":"#1a1a1a",border:`1px solid ${showGitHub?"#1D9E75":"#2a2a2a"}`,borderRadius:"7px",color:showGitHub?"#14b87a":"#666",cursor:"pointer"}}>
-              ⑂ GitHub
+            {/* GitHub button */}
+            <button
+              onClick={() => setShowGitHub((v) => !v)}
+              className={`p-2 rounded-lg transition-colors touch-target ${
+                showGitHub ? "bg-zinc-800 text-teal-400" : "text-zinc-500 hover:text-zinc-300"
+              }`}
+              aria-label="Toggle GitHub sidebar"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+              </svg>
+            </button>
+
+            {/* Settings button (mobile) */}
+            <button
+              onClick={() => setMobileSettings(true)}
+              className="md:hidden p-2 text-zinc-500 hover:text-zinc-300 touch-target"
+              aria-label="Open settings"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+
+            {/* New chat button */}
+            <button
+              onClick={newConversation}
+              className="p-2 text-zinc-500 hover:text-zinc-300 touch-target"
+              aria-label="New conversation"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
             </button>
           </div>
-        </header>
+        </div>
 
-        {mobileSettings && (
-          <>
-            <div className="fixed inset-0 bg-black/60 z-50 md:hidden" onClick={() => setMobileSettings(false)} />
-            <div className="fixed bottom-0 left-0 right-0 z-50 bg-zinc-900 border-t border-zinc-700 rounded-t-2xl p-5 space-y-4 md:hidden">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-zinc-300 text-sm font-semibold">Settings</span>
-                <button onClick={() => setMobileSettings(false)} className="text-zinc-500 hover:text-zinc-200 text-lg">✕</button>
+        {/* ── Messages area ──────────────────────────────────────────────── */}
+        <div className="flex-1 overflow-y-auto px-3 md:px-4 py-4 space-y-4 mobile-scroll">
+          {messages.length === 0 && !loading && (
+            <div className="flex flex-col items-center justify-center h-full text-center px-4">
+              <div className="mb-6">
+                <h1 className="text-2xl md:text-3xl font-bold text-zinc-100 mb-2">ORA</h1>
+                <p className="text-zinc-500 text-sm">Your AI coding agent</p>
+              </div>
+
+              {/* Quick prompts */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg mb-4">
+                {(agentMode ? AGENT_PROMPTS : QUICK_PROMPTS).map((prompt, i) => (
+                  <button
+                    key={i}
+                    onClick={() => sendMessage(prompt)}
+                    className="text-left text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg p-3 hover:bg-zinc-800 hover:border-zinc-700 transition-colors touch-target"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+
+              {/* Provider info */}
+              <div className="text-xs text-zinc-600">
+                {isAuto ? "Auto-routing" : activeProvider?.name || "No provider"} ·{" "}
+                {isAuto ? "smart model selection" : selectedModel || "default"}
               </div>
             </div>
-          </>
+          )}
+
+          {messages.map((msg, i) => (
+            <ChatMessage
+              key={msg.id ?? i}
+              message={msg}
+              activeRepo={activeRepo}
+              onSaveSnippet={saveSnippet}
+            />
+          ))}
+
+          {loading && (
+            <div className="flex items-center gap-2 text-zinc-500 text-sm px-4">
+              <span className="animate-pulse">⟳</span>
+              <span>{agentStatus || "Thinking..."}</span>
+            </div>
+          )}
+
+          <div ref={bottomRef} />
+        </div>
+
+        {/* ── Staged changes / Plan approval ─────────────────────────────── */}
+        {stagedFiles.length > 0 && (
+          <StagedChanges
+            files={stagedFiles}
+            repo={activeRepo}
+            onPush={(files) => {
+              // Handle push
+            }}
+            onDiscard={() => setStagedFiles([])}
+          />
         )}
 
-        <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+        {currentPlan && agentPhase === "awaiting_approval" && (
+          <PlanApproval
+            plan={currentPlan}
+            task={currentTask}
+            onApprove={(plan) => {
+              // Handle approval
+            }}
+            onReject={() => {
+              setCurrentPlan(null);
+              setAgentPhase("idle");
+            }}
+            executing={agentPhase === "executing"}
+          />
+        )}
 
-          {showGitHub && (
-            <>
-              <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setShowGitHub(false)} />
-              <div className="fixed md:static inset-y-0 right-0 z-40 md:z-auto shadow-xl md:shadow-none">
-                <GitHubSidebar
-                  onFilesChange={handleFilesChange}
-                  savedContext={active?.githubContext}
-                  onClose={() => setShowGitHub(false)}
-                  pinnedFiles={pinnedFiles}
-                  onTogglePinnedFile={togglePinnedFile}
-                />
-              </div>
-            </>
-          )}
-
-          <main style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
-
-            {showSystemPrompt && (
-              <div style={{borderBottom:"1px solid #2d1b69",background:"#130d2e",padding:"12px 16px",flexShrink:0}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px"}}>
-                  <span style={{fontSize:"12px",color:"#a78bfa",fontWeight:500}}>⚙ System prompt — prepended to every message in this conversation</span>
-                  <button onClick={()=>{saveSystemPrompt(systemPrompt);setShowSystemPrompt(false)}} style={{fontSize:"12px",color:"#7c3aed",background:"none",border:"none",cursor:"pointer"}}>Save &amp; close</button>
-                </div>
-                <textarea value={systemPrompt} onChange={e=>setSystemPrompt(e.target.value)} onBlur={()=>saveSystemPrompt(systemPrompt)}
-                  placeholder={`e.g. "This is a React + Supabase project. Always use TypeScript."`}
-                  rows={3}
-                  style={{width:"100%",background:"#0d0d1a",border:"1px solid #4c1d95",borderRadius:"8px",padding:"8px 12px",fontSize:"12px",color:"#e4e4e7",fontFamily:"monospace",resize:"none",outline:"none",boxSizing:"border-box"}}
-                />
-              </div>
-            )}
-
-            {showSnippets && (
-              <div style={{borderBottom:"1px solid #78350f",background:"#1c0d02",padding:"12px 16px",flexShrink:0,maxHeight:"200px",overflowY:"auto"}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px"}}>
-                  <span style={{fontSize:"12px",color:"#f59e0b",fontWeight:500}}>📎 Snippet library</span>
-                  <button onClick={()=>setShowSnippets(false)} style={{fontSize:"12px",color:"#555",background:"none",border:"none",cursor:"pointer"}}>✕</button>
-                </div>
-                {snippets.length === 0 ? (
-                  <p style={{fontSize:"12px",color:"#555"}}>No snippets yet — use the 💾 button on any code block to save one.</p>
-                ) : (
-                  <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
-                    {snippets.map(s=>(
-                      <div key={s.id} style={{display:"flex",alignItems:"center",gap:"8px",background:"#111",border:"1px solid #222",borderRadius:"7px",padding:"6px 10px"}}>
-                        <span style={{fontSize:"12px",color:"#f59e0b",fontWeight:500,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.label}</span>
-                        <span style={{fontSize:"11px",color:"#555",fontFamily:"monospace"}}>{s.lang}</span>
-                        <button onClick={()=>insertSnippet(s.code)} style={{fontSize:"11px",color:"#14b87a",background:"#0f2e24",border:"1px solid #1D9E75",borderRadius:"4px",padding:"2px 8px",cursor:"pointer"}}>Insert</button>
-                        <button onClick={()=>deleteSnippet(s.id)} style={{fontSize:"11px",color:"#555",background:"none",border:"none",cursor:"pointer"}} onMouseEnter={e=>(e.currentTarget as HTMLElement).style.color="#ef4444"} onMouseLeave={e=>(e.currentTarget as HTMLElement).style.color="#555"}>✕</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {agentMode && activeRepo && (
-              <div style={{display:"flex",alignItems:"center",gap:"10px",padding:"6px 16px",borderBottom:"1px solid #1e1e1e",background:"#0d0d0d",flexShrink:0,flexWrap:"wrap"}}>
-                <label style={{display:"flex",alignItems:"center",gap:"6px",cursor:"pointer"}}>
-                  <div onClick={()=>setBranchFirst(v=>!v)}
-                    style={{width:"30px",height:"16px",borderRadius:"8px",background:branchFirst?"#1D9E75":"#2a2a2a",position:"relative",cursor:"pointer",transition:"background .2s"}}>
-                    <div style={{position:"absolute",top:"2px",width:"12px",height:"12px",background:"#fff",borderRadius:"50%",transition:"transform .2s",transform:branchFirst?"translateX(16px)":"translateX(2px)"}} />
-                  </div>
-                  <span style={{fontSize:"12px",color:"#888"}}>Branch-first</span>
-                </label>
-                {branchFirst && agentBranch && (
-                  <span style={{fontSize:"11px",color:"#14b87a",fontFamily:"monospace",background:"#0f2e24",border:"1px solid #1D9E75",borderRadius:"4px",padding:"2px 7px"}}>⑂ {agentBranch}</span>
-                )}
-                {branchFirst && !agentBranch && (
-                  <span style={{fontSize:"11px",color:"#555"}}>Auto-creates feature branch before each run</span>
-                )}
-                {editingProject ? (
-                  <input value={projectInput} onChange={e=>setProjectInput(e.target.value)} onBlur={handleProjectSave}
-                    onKeyDown={e=>{if(e.key==="Enter")handleProjectSave();if(e.key==="Escape")setEditingProject(false)}}
-                    style={{marginLeft:"auto",background:"#1a1a1a",border:"1px solid #14b87a",borderRadius:"5px",padding:"3px 8px",fontSize:"12px",color:"#ccc",outline:"none",width:"120px"}}
-                    autoFocus />
-                ) : (
-                  <button onClick={()=>setEditingProject(true)} style={{marginLeft:"auto",fontSize:"12px",color:"#555",background:"none",border:"1px solid #2a2a2a",borderRadius:"5px",padding:"3px 8px",cursor:"pointer"}}
-                    onMouseEnter={e=>(e.currentTarget as HTMLElement).style.color="#ccc"}
-                    onMouseLeave={e=>(e.currentTarget as HTMLElement).style.color="#555"}>
-                    {active?.project||projectInput||"+ project name"}
-                  </button>
-                )}
-              </div>
-            )}
-
-            {agentStatus && (
-              <div style={{padding:"7px 16px",background:"#1c0f00",borderBottom:"1px solid #78350f",display:"flex",alignItems:"center",gap:"8px",flexShrink:0}}>
-                <span style={{color:"#f59e0b",fontSize:"12px",animation:"spin 1s linear infinite",display:"inline-block"}}>⟳</span>
-                <span style={{color:"#d97706",fontSize:"12px",fontFamily:"monospace"}}>{agentStatus}</span>
-              </div>
-            )}
-            {agentPhase==="executing" && !agentStatus && (
-              <div style={{padding:"7px 16px",background:"#111",borderBottom:"1px solid #1e1e1e",display:"flex",alignItems:"center",gap:"8px",flexShrink:0}}>
-                <span style={{color:"#555",fontSize:"12px"}}>⟳</span>
-                <span style={{color:"#555",fontSize:"12px"}}>Writing files…</span>
-              </div>
-            )}
-
-            <div style={{flex:1,overflowY:"auto",padding:"24px 20px 12px",display:"flex",flexDirection:"column",gap:"20px"}}>
-              {messages.length === 0 ? (
-                <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"20px",textAlign:"center",padding:"40px 20px"}}>
-                  <div>
-                    <div style={{fontSize:"36px",marginBottom:"8px"}}>{agentMode?"⚡":"◈"}</div>
-                    <h2 style={{fontSize:"18px",fontWeight:600,color:"#fff",marginBottom:"6px"}}>
-                      {agentMode ? "ORA Agent" : "ORA Coding Agent"}
-                    </h2>
-                    <p style={{fontSize:"13px",color:"#555",maxWidth:"340px",lineHeight:1.6}}>
-                      {agentMode
-                        ? activeRepo
-                          ? "Describe a task → ORA plans → you approve → code is written → review diffs → push to GitHub."
-                          : "Connect a GitHub repo from the sidebar to start using Agent mode."
-                        : "Ask anything about code. Switch to ⚡ Agent mode to autonomously edit your repo."}
-                    </p>
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",width:"100%",maxWidth:"480px"}}>
-                    {(agentMode?AGENT_PROMPTS:QUICK_PROMPTS).map(p=>(
-                      <button key={p} onClick={()=>sendMessage(p)}
-                        style={{textAlign:"left",fontSize:"12px",color:"#666",background:"#141414",border:"1px solid #1e1e1e",borderRadius:"10px",padding:"10px 12px",cursor:"pointer",lineHeight:1.5,transition:"all .15s"}}
-                        onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.borderColor="#14b87a";(e.currentTarget as HTMLElement).style.color="#ccc"}}
-                        onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.borderColor="#1e1e1e";(e.currentTarget as HTMLElement).style.color="#666"}}
-                      >{p}</button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                messages.map((msg,i)=>(
-                  <div key={i}>
-                    {msg.role==="assistant" && routingBadges[i] && (
-                      <div style={{display:"flex",justifyContent:"flex-start",marginBottom:"4px",marginLeft:"36px"}}>
-                        <span style={{fontSize:"11px",color:"#d97706",background:"#1c1206",border:"1px solid #78350f",borderRadius:"20px",padding:"2px 8px"}}>⚡ {routingBadges[i].reason}</span>
-                      </div>
-                    )}
-                    <ChatMessage message={msg} activeRepo={activeRepo} onSaveSnippet={saveSnippet} />
-                  </div>
-                ))
+        {/* ── Input area ─────────────────────────────────────────────────── */}
+        <div className="border-t border-zinc-800 bg-zinc-900/80 backdrop-blur-sm pb-safe">
+          <div className="px-3 md:px-4 py-2">
+            {/* Context indicators */}
+            <div className="flex items-center gap-2 mb-2 overflow-x-auto">
+              {injectedFiles.length > 0 && (
+                <span className="text-xs text-teal-400 bg-teal-900/30 rounded-full px-2 py-0.5 whitespace-nowrap">
+                  📄 {injectedFiles.length} file{injectedFiles.length !== 1 ? "s" : ""}
+                </span>
               )}
-              {loading && messages[messages.length-1]?.content==="" && (
-                <div style={{display:"flex",gap:"6px",color:"#555",marginLeft:"36px"}}>
-                  <span style={{animation:"pulse 1.2s ease-in-out infinite"}}>●</span>
-                  <span style={{animation:"pulse 1.2s ease-in-out infinite",animationDelay:"0.2s"}}>●</span>
-                  <span style={{animation:"pulse 1.2s ease-in-out infinite",animationDelay:"0.4s"}}>●</span>
-                </div>
+              {localFiles.length > 0 && (
+                <span className="text-xs text-blue-400 bg-blue-900/30 rounded-full px-2 py-0.5 whitespace-nowrap">
+                  📁 {localFiles.length} local
+                </span>
               )}
-              <div ref={bottomRef} />
+              {agentMode && (
+                <span className="text-xs text-purple-400 bg-purple-900/30 rounded-full px-2 py-0.5 whitespace-nowrap">
+                  🤖 Agent mode
+                </span>
+              )}
+              {activeRepo && (
+                <span className="text-xs text-zinc-500 truncate max-w-[120px]">
+                  {activeRepo.split("/").pop()}
+                </span>
+              )}
             </div>
 
-            {agentPhase==="awaiting_approval" && currentPlan && (
-              <PlanApproval plan={currentPlan} task={currentTask} onApprove={executePlan} onReject={rejectPlan} executing={false} />
-            )}
-
-            {showStagedChanges && (
-              <StagedChanges
-                files={stagedFiles}
-                repo={activeRepo}
-                onPush={async()=>{
-                  setStagedFiles([]);setAgentPhase("idle");
-                  if(currentPlan&&activeRepo){
-                    const branch=(document.querySelector('input[placeholder*="Branch"]') as HTMLInputElement)?.value?.trim();
-                    if(branch){
-                      const repoRes=await fetch(`/api/github?action=repos`).then(r=>r.json()).catch(()=>[]);
-                      const defaultBranch=(repoRes as {full_name:string;default_branch:string}[]).find(r=>r.full_name===activeRepo)?.default_branch??"main";
-                      const prBody=[`## Summary\n${currentPlan.summary}`,`## Approach\n${currentPlan.approach}`,`## Files changed`,currentPlan.changes.map((c:{action:string;path:string;reason:string})=>`- **${c.action}** \`${c.path}\`: ${c.reason}`).join("\n"),`---\n*Generated by ORA coding agent*`].join("\n\n");
-                      fetch("/api/github",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"create_pr",repo:activeRepo,head:branch,base:defaultBranch,title:currentPlan.summary,body:prBody})}).then(r=>r.json()).then(pr=>{if(pr.url)window.open(pr.url,"_blank")}).catch(console.error);
-                    }
-                  }
-                }}
-                onDiscard={()=>{setStagedFiles([]);setAgentPhase("idle")}}
-              />
-            )}
-
-            <div style={{borderTop:"1px solid #1e1e1e",padding:"10px 16px 14px",background:"#111",flexShrink:0}}>
-              {agentMode&&!activeRepo&&(
-                <p style={{fontSize:"12px",color:"#d97706",textAlign:"center",marginBottom:"8px"}}>⚠ Connect a GitHub repo from the sidebar to use Agent mode</p>
-              )}
-              <div style={{display:"flex",gap:"6px",marginBottom:"8px",flexWrap:"wrap",alignItems:"center"}}>
-                <LocalFileContext onFilesLoaded={files=>{setLocalFiles(files);setInjectedFiles(prev=>{const lp=new Set(files.map(f=>f.path));return[...prev.filter(f=>!lp.has(f.path)),...files]})}} />
-                {agentMode&&activeRepo&&(
-                  <button onClick={()=>setBranchFirst(v=>!v)}
-                    style={{display:"flex",alignItems:"center",gap:"4px",fontSize:"11px",color:branchFirst?"#14b87a":"#555",background:branchFirst?"#0f2e24":"#1a1a1a",border:`1px solid ${branchFirst?"#1D9E75":"#2a2a2a"}`,borderRadius:"5px",padding:"3px 8px",cursor:"pointer"}}>
-                    ⑂ branch-first
-                  </button>
-                )}
-                <span style={{marginLeft:"auto",fontSize:"11px",color:"#333",fontFamily:"monospace"}}>⌘? for shortcuts</span>
-              </div>
-              <div style={{display:"flex",gap:"8px",alignItems:"flex-end"}}>
+            <div className="flex items-end gap-2">
+              <div className="flex-1 relative">
                 <textarea
+                  ref={inputRef}
                   value={input}
-                  onChange={e=>setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={
-                    agentPhase==="awaiting_approval" ? "Approve or reject the plan above first…"
-                    : agentMode&&activeRepo ? `Describe a task for ${activeRepo.split("/")[1]}…`
-                    : agentMode ? "Connect a GitHub repo first…"
-                    : isAuto ? "Ask ORA anything — Auto picks the best model…"
-                    : "Ask ORA… (Shift+Enter for newline)"
-                  }
-                  disabled={inputDisabled}
-                  rows={2}
-                  style={{flex:1,background:"#1a1a1a",border:`1px solid ${agentMode?"#1D9E75":"#2a2a2a"}`,borderRadius:"10px",padding:"10px 14px",fontSize:"13px",color:"#e4e4e7",resize:"none",outline:"none",fontFamily:"inherit",lineHeight:1.5,transition:"border-color .2s",opacity:inputDisabled?0.5:1}}
-                  onFocus={e=>(e.currentTarget as HTMLElement).style.borderColor=agentMode?"#14b87a":"#3f3f46"}
-                  onBlur={e=>(e.currentTarget as HTMLElement).style.borderColor=agentMode?"#1D9E75":"#2a2a2a"}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      sendMessage();
+                    }
+                  }}
+                  placeholder={agentMode ? "Tell the agent what to do..." : "Ask anything about your code..."}
+                  rows={1}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2.5 text-zinc-100 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-teal-600 resize-none min-h-[44px] max-h-[120px]"
+                  style={{ fontSize: "16px" }}
                 />
-                <button
-                  onClick={()=>sendMessage()}
-                  disabled={inputDisabled||!input.trim()||isAgentBusy}
-                  style={{width:"42px",height:"42px",borderRadius:"10px",background:inputDisabled||!input.trim()||isAgentBusy?"#1a1a1a":"#14b87a",border:"none",cursor:inputDisabled||!input.trim()||isAgentBusy?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"18px",color:inputDisabled||!input.trim()||isAgentBusy?"#333":"#000",flexShrink:0,transition:"all .15s"}}
-                >
-                  {loading?"…":"↑"}
-                </button>
               </div>
+              <button
+                onClick={() => sendMessage()}
+                disabled={!input.trim() || loading}
+                className="bg-teal-700 hover:bg-teal-600 disabled:bg-zinc-800 disabled:text-zinc-600 text-white rounded-xl px-4 py-2.5 text-sm font-medium transition-colors touch-target flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+                <span className="hidden sm:inline">Send</span>
+              </button>
             </div>
-          </main>
+          </div>
         </div>
       </div>
 
-      <style>{`
-        .conv-del-btn { opacity: 0 !important; transition: opacity .15s; }
-        div:hover > .conv-del-btn { opacity: 1 !important; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }
-        * { scrollbar-width: thin; scrollbar-color: #2a2a2a transparent; }
-        ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
-        select option { background: #1a1a1a; color: #ccc; }
-      `}</style>
+      {/* ── GitHub sidebar (mobile: overlay) ─────────────────────────────── */}
+      <div className={`
+        ${isMobile ? 'fixed inset-y-0 right-0 z-50 w-[85vw] max-w-[360px] bg-zinc-900 border-l border-zinc-800 transform transition-transform duration-300 ease-in-out' : 'w-80 border-l border-zinc-800 flex-shrink-0 hidden md:flex'}
+        ${isMobile && !showGitHub ? 'translate-x-full' : 'translate-x-0'}
+        flex flex-col
+      `}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+          <h2 className="text-zinc-200 text-sm font-semibold">GitHub</h2>
+          {isMobile && (
+            <button
+              onClick={() => setShowGitHub(false)}
+              className="text-zinc-500 hover:text-zinc-300 p-2 touch-target"
+              aria-label="Close GitHub sidebar"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <GitHubSidebar
+            onFilesChange={handleFilesChange}
+            savedContext={active?.githubContext}
+            onClose={() => setShowGitHub(false)}
+            pinnedFiles={pinnedFiles}
+            onTogglePinnedFile={(repo, filePath) => {
+              setPinnedFiles((prev) => {
+                const current = prev[repo] || [];
+                const updated = current.includes(filePath)
+                  ? current.filter((f) => f !== filePath)
+                  : [...current, filePath];
+                const next = { ...prev, [repo]: updated };
+                localStorage.setItem("codeagent:pinnedFiles", JSON.stringify(next));
+                return next;
+              });
+            }}
+          />
+        </div>
+      </div>
 
+      {/* ── Mobile settings bottom sheet ─────────────────────────────────── */}
+      {isMobile && mobileSettings && (
+        <div className="fixed inset-0 z-50 flex items-end">
+          <div className="mobile-overlay" onClick={() => setMobileSettings(false)} />
+          <div className="mobile-bottom-sheet w-full">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+              <h2 className="text-zinc-200 text-sm font-semibold">Settings</h2>
+              <button
+                onClick={() => setMobileSettings(false)}
+                className="text-zinc-500 hover:text-zinc-300 p-2 touch-target"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              {/* Provider selector */}
+              <div>
+                <label className="text-zinc-400 text-xs mb-1 block">Provider</label>
+                <select
+                  value={selectedProviderId}
+                  onChange={(e) => handleProviderChange(e.target.value)}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:border-teal-600"
+                >
+                  <option value="auto">🤖 Auto (smart routing)</option>
+                  {providers.map((p) => (
+                    <option key={p.id} value={p.id} disabled={!p.configured}>
+                      {p.configured ? p.name : `${p.name} (not configured)`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Model selector */}
+              {!isAuto && activeProvider && (
+                <div>
+                  <label className="text-zinc-400 text-xs mb-1 block">Model</label>
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:border-teal-600"
+                  >
+                    {activeProvider.models.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Project */}
+              <div>
+                <label className="text-zinc-400 text-xs mb-1 block">Project</label>
+                <input
+                  value={projectInput}
+                  onChange={(e) => setProjectInput(e.target.value)}
+                  onBlur={() => {
+                    if (activeId) setProject(projectInput);
+                  }}
+                  placeholder="e.g. my-app"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:border-teal-600 placeholder:text-zinc-600"
+                />
+              </div>
+
+              {/* System prompt */}
+              <div>
+                <label className="text-zinc-400 text-xs mb-1 block">System prompt</label>
+                <textarea
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  onBlur={() => {
+                    if (activeId) saveSystemPrompt(systemPrompt);
+                  }}
+                  rows={3}
+                  placeholder="Custom instructions for the AI..."
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-zinc-100 text-sm focus:outline-none focus:border-teal-600 placeholder:text-zinc-600 resize-none"
+                />
+              </div>
+
+              {/* Local files */}
+              <div>
+                <label className="text-zinc-400 text-xs mb-1 block">Local files</label>
+                <LocalFileContext onFilesLoaded={(files) => {
+                  setLocalFiles((prev) => [...prev, ...files]);
+                  setMobileSettings(false);
+                }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Help modal ───────────────────────────────────────────────────── */}
       <ShortcutHelpModal open={showHelp} onClose={() => setShowHelp(false)} />
     </div>
   );

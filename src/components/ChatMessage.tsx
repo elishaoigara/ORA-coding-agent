@@ -12,7 +12,7 @@ import { formatTokens, formatCost } from "@/lib/tokenCost";
 interface Props {
   message: Message;
   activeRepo?: string;
-  onSaveSnippet?: (lang: string, code: string) => void;  // ADD THIS
+  onSaveSnippet?: (lang: string, code: string) => void;
 }
 
 // Languages we can run inline in a sandboxed iframe
@@ -127,7 +127,7 @@ function TokenBadge({ message }: { message: Message & { usage?: { totalTokens: n
   return (
     <button
       onClick={() => setExpanded((v) => !v)}
-      className="group relative text-xs text-zinc-600 hover:text-zinc-400 transition-colors tabular-nums"
+      className="group relative text-xs text-zinc-600 hover:text-zinc-400 transition-colors tabular-nums touch-target"
       title="Token usage"
     >
       {formatTokens(usage.totalTokens)} tok
@@ -148,199 +148,191 @@ function TokenBadge({ message }: { message: Message & { usage?: { totalTokens: n
 function CodeBlock({ lang, code, activeRepo, onSaveSnippet }: { lang: string; code: string; activeRepo?: string; onSaveSnippet?: (lang: string, code: string) => void }) {
   const [copied, setCopied] = useState(false);
   const { output, running, run, clear } = useCodeRunner();
-  const canRun = RUNNABLE_LANGS.has(lang.toLowerCase());
+  const [showPush, setShowPush] = useState(false);
+  const [showFullCode, setShowFullCode] = useState(false);
 
-  function copy() {
-    navigator.clipboard.writeText(code);
+  const isRunnable = RUNNABLE_LANGS.has(lang);
+  const codeFiles = extractCodeFiles(code);
+  const lineCount = code.split("\n").length;
+  const isLongCode = lineCount > 30;
+
+  const handleCopy = useCallback(async () => {
+    await navigator.clipboard.writeText(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }
-
-  function saveSnippet() {
-    if (onSaveSnippet) {
-      onSaveSnippet(lang, code);
-    }
-  }
+  }, [code]);
 
   return (
-    <div className="my-3 rounded-lg overflow-hidden border border-zinc-700">
-      {/* Header bar */}
-      <div className="flex items-center justify-between bg-zinc-900 px-3 py-1.5 border-b border-zinc-700">
-        <span className="text-xs text-zinc-500 font-mono">{lang}</span>
-        <div className="flex items-center gap-2">
-          {onSaveSnippet && (
+    <div className="relative group my-2">
+      {/* Header */}
+      <div className="flex items-center justify-between bg-zinc-800 rounded-t-lg px-3 py-1.5 border-b border-zinc-700">
+        <span className="text-xs text-zinc-400">{lang || "code"}</span>
+        <div className="flex items-center gap-1">
+          {isRunnable && (
             <button
-              onClick={saveSnippet}
-              className="text-xs text-purple-600 hover:text-purple-400 transition-colors"
-              title="Save to snippet library"
+              onClick={() => run(code)}
+              disabled={running}
+              className="text-xs text-teal-400 hover:text-teal-300 px-2 py-1 rounded touch-target"
             >
-              💾
+              {running ? "⟳" : "▶ Run"}
             </button>
           )}
-          {canRun && (
+          {onSaveSnippet && (
             <button
-              onClick={() => output ? clear() : run(code)}
-              disabled={running}
-              className="text-xs text-teal-600 hover:text-teal-400 transition-colors disabled:opacity-50 flex items-center gap-1"
+              onClick={() => onSaveSnippet(lang, code)}
+              className="text-xs text-zinc-500 hover:text-zinc-300 px-2 py-1 rounded touch-target"
+              title="Save as snippet"
             >
-              {running ? (
-                <><span className="animate-spin inline-block text-[10px]">⟳</span> running</>
-              ) : output ? (
-                "× clear"
-              ) : (
-                "▶ run"
-              )}
+              📋
             </button>
           )}
           <button
-            onClick={copy}
-            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            onClick={handleCopy}
+            className="text-xs text-zinc-500 hover:text-zinc-300 px-2 py-1 rounded touch-target"
           >
-            {copied ? "✓ copied" : "copy"}
+            {copied ? "✓" : "Copy"}
           </button>
         </div>
       </div>
 
       {/* Code */}
-      <SyntaxHighlighter
-        style={vscDarkPlus}
-        language={lang}
-        PreTag="div"
-        customStyle={{
-          margin: 0,
-          borderRadius: 0,
-          background: "#111",
-          fontSize: "12px",
-          maxHeight: "600px",
-          overflow: "auto",
-        }}
-      >
-        {code}
-      </SyntaxHighlighter>
-
-      {/* Run output */}
-      {output !== null && (
-        <div className="bg-zinc-950 border-t border-zinc-700 px-3 py-2 font-mono text-xs max-h-48 overflow-y-auto">
-          {output.length === 0 ? (
-            <span className="text-zinc-600">// no output</span>
-          ) : (
-            output.map((line, i) => (
-              <div key={i} className={line.type === "error" ? "text-red-400" : "text-zinc-300"}>
-                {line.type === "error" ? "✗ " : ""}{line.text}
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Main component ────────────────────────────────────────────────────────────
-export default function ChatMessage({ message, activeRepo, onSaveSnippet }: Props) {
-  const isUser = message.role === "user";
-  const [showPush, setShowPush] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  const codeFiles = !isUser ? extractCodeFiles(message.content) : [];
-  const hasCode   = codeFiles.length > 0;
-
-  function copyAll() {
-    navigator.clipboard.writeText(message.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
-  return (
-    <>
-      <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
-        {!isUser && (
-          <div className="w-7 h-7 rounded-full bg-teal-900 border border-teal-700 flex items-center justify-center text-teal-300 text-xs font-bold flex-shrink-0 mt-0.5">
-            AI
+      <div className="relative">
+        {isLongCode && !showFullCode ? (
+          <div>
+            <SyntaxHighlighter
+              language={lang || "text"}
+              style={vscDarkPlus}
+              customStyle={{ margin: 0, borderRadius: "0 0 0.5rem 0.5rem", fontSize: "12px", maxHeight: "300px", overflow: "hidden" }}
+              showLineNumbers={false}
+            >
+              {code.split("\n").slice(0, 20).join("\n")}
+            </SyntaxHighlighter>
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-zinc-900 to-transparent h-16 pointer-events-none" />
+            <button
+              onClick={() => setShowFullCode(true)}
+              className="w-full text-center text-xs text-teal-400 hover:text-teal-300 py-2 bg-zinc-900/80 backdrop-blur-sm touch-target"
+            >
+              Show all {lineCount} lines
+            </button>
           </div>
-        )}
-
-        <div className="max-w-[92%] md:max-w-[82%] flex flex-col gap-1">
-          <div className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${
-            isUser
-              ? "bg-zinc-700 text-zinc-100 rounded-br-none"
-              : "bg-zinc-800 text-zinc-200 rounded-bl-none"
-          }`}>
-            {isUser ? (
-              <p className="whitespace-pre-wrap">{message.content}</p>
-            ) : (
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  code({ className, children, ...props }) {
-                    const match = /language-(\w+)/.exec(className ?? "");
-                    const isInline = !match;
-                    if (isInline) {
-                      return (
-                        <code className="bg-zinc-900 px-1.5 py-0.5 rounded text-teal-300 text-xs font-mono" {...props}>
-                          {children}
-                        </code>
-                      );
-                    }
-                    const codeStr = String(children).replace(/\n$/, "");
-                    return (
-                      <CodeBlock
-                        lang={match[1]}
-                        code={codeStr}
-                        activeRepo={activeRepo}
-                        onSaveSnippet={onSaveSnippet}
-                      />
-                    );
-                  },
-                  p({ children }) { return <p className="mb-2 last:mb-0">{children}</p>; },
-                  ul({ children }) { return <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>; },
-                  ol({ children }) { return <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>; },
-                  blockquote({ children }) {
-                    return <blockquote className="border-l-2 border-teal-700 pl-3 text-zinc-400 my-2">{children}</blockquote>;
-                  },
-                }}
-              >
-                {message.content}
-              </ReactMarkdown>
-            )}
-          </div>
-
-          {/* Action row under AI messages */}
-          {!isUser && message.content.length > 0 && (
-            <div className="flex items-center gap-3 px-1">
-              <button onClick={copyAll} className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors">
-                {copied ? "✓ copied" : "copy response"}
-              </button>
-              {hasCode && activeRepo && (
-                <button
-                  onClick={() => setShowPush(true)}
-                  className="text-xs text-teal-600 hover:text-teal-400 transition-colors flex items-center gap-1"
-                >
-                  ↑ push to GitHub
-                </button>
-              )}
-              {/* Token badge — inline, right-aligned */}
-              <span className="ml-auto">
-                <TokenBadge message={message} />
-              </span>
-            </div>
-          )}
-        </div>
-
-        {isUser && (
-          <div className="w-7 h-7 rounded-full bg-zinc-700 border border-zinc-600 flex items-center justify-center text-zinc-300 text-xs font-bold flex-shrink-0 mt-0.5">
-            U
-          </div>
+        ) : (
+          <SyntaxHighlighter
+            language={lang || "text"}
+            style={vscDarkPlus}
+            customStyle={{ margin: 0, borderRadius: "0 0 0.5rem 0.5rem", fontSize: "12px", maxHeight: "400px" }}
+            showLineNumbers={false}
+          >
+            {code}
+          </SyntaxHighlighter>
         )}
       </div>
 
-      {showPush && activeRepo && (
+      {/* Run output */}
+      {output && (
+        <div className="bg-zinc-900 border border-zinc-700 rounded-b-lg p-3 mt-0">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-zinc-500">Output</span>
+            <button onClick={clear} className="text-xs text-zinc-600 hover:text-zinc-400 touch-target">Clear</button>
+          </div>
+          <pre className="text-xs font-mono whitespace-pre-wrap max-h-32 overflow-y-auto">
+            {output.map((line, i) => (
+              <div key={i} className={line.type === "error" ? "text-red-400" : "text-green-400"}>
+                {line.text}
+              </div>
+            ))}
+          </pre>
+        </div>
+      )}
+
+      {/* Push to GitHub */}
+      {showPush && activeRepo && codeFiles.length > 0 && (
         <PushToGitHub
           repo={activeRepo}
           files={codeFiles}
           onClose={() => setShowPush(false)}
         />
       )}
-    </>
+    </div>
+  );
+}
+
+// ── Main ChatMessage component ────────────────────────────────────────────────
+export default function ChatMessage({ message, activeRepo, onSaveSnippet }: Props) {
+  const isUser = message.role === "user";
+  const isSystem = message.role === "system";
+
+  if (isSystem) {
+    return (
+      <div className="flex justify-center">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-xs text-zinc-500 italic max-w-lg text-center">
+          {message.content}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"} px-2`}>
+      <div className={`max-w-[85%] md:max-w-[75%] ${isUser ? "order-1" : "order-1"}`}>
+        <div
+          className={`rounded-2xl px-4 py-2.5 ${
+            isUser
+              ? "bg-teal-800 text-teal-50"
+              : "bg-zinc-800 text-zinc-200"
+          }`}
+        >
+          {isUser ? (
+            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+          ) : (
+            <div className="prose prose-invert prose-sm max-w-none">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  code({ className, children, ...props }) {
+                    const match = /language-(\w+)/.exec(className || "");
+                    const codeString = String(children).replace(/\n$/, "");
+                    
+                    if (match) {
+                      return (
+                        <CodeBlock
+                          lang={match[1]}
+                          code={codeString}
+                          activeRepo={activeRepo}
+                          onSaveSnippet={onSaveSnippet}
+                        />
+                      );
+                    }
+                    
+                    return (
+                      <code className="bg-zinc-700 rounded px-1 py-0.5 text-xs" {...props}>
+                        {children}
+                      </code>
+                    );
+                  },
+                  pre({ children }) {
+                    return <>{children}</>;
+                  },
+                  // Make tables scrollable on mobile
+                  table({ children }) {
+                    return (
+                      <div className="overflow-x-auto -mx-2">
+                        <table className="min-w-full">{children}</table>
+                      </div>
+                    );
+                  },
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          )}
+        </div>
+
+        {/* Token usage */}
+        <div className="flex items-center gap-2 mt-1 px-1">
+          <TokenBadge message={message as any} />
+        </div>
+      </div>
+    </div>
   );
 }

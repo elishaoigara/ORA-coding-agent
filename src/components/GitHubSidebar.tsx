@@ -5,10 +5,10 @@ import type { GitHubRepo, GitHubFile, InjectedFile, GitHubContext } from "@/type
 
 interface Props {
   onFilesChange: (files: InjectedFile[], repo: string) => void;
-  savedContext?: GitHubContext; // restored from conversation
-  onClose?: () => void;        // called by the mobile close button
-  pinnedFiles?: Record<string, string[]>;  // ADD THIS
-  onTogglePinnedFile?: (repo: string, filePath: string) => void;  // ADD THIS
+  savedContext?: GitHubContext;
+  onClose?: () => void;
+  pinnedFiles?: Record<string, string[]>;
+  onTogglePinnedFile?: (repo: string, filePath: string) => void;
 }
 
 const MODEL_LIMIT = 128000;
@@ -49,6 +49,7 @@ export default function GitHubSidebar({ onFilesChange, savedContext, onClose, pi
   const [error, setError] = useState("");
   const [pathHistory, setPathHistory] = useState<string[]>([]);
   const [contextRestored, setContextRestored] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const tokenCount = useMemo(() => estimateTokens(injected), [injected]);
 
@@ -151,109 +152,182 @@ export default function GitHubSidebar({ onFilesChange, savedContext, onClose, pi
   }
 
   function navigateBack() {
-    const prev = pathHistory[pathHistory.length - 1] ?? "";
+    if (!selectedRepo || pathHistory.length === 0) return;
+    const prev = pathHistory[pathHistory.length - 1];
     setPathHistory((h) => h.slice(0, -1));
-    if (selectedRepo) browseRepo(selectedRepo, prev);
+    browseRepo(selectedRepo, prev);
   }
 
+  // Filter repos by search
+  const filteredRepos = searchQuery
+    ? repos.filter((r) =>
+        r.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (r.description && r.description.toLowerCase().includes(searchQuery.toLowerCase()))
+      )
+    : repos;
+
   return (
-    <aside className="w-64 md:w-64 h-full border-r border-zinc-800 flex flex-col bg-zinc-950 text-sm flex-shrink-0">
-      <div className="px-3 py-2 border-b border-zinc-800 font-medium text-zinc-400 text-xs uppercase tracking-wider flex items-center justify-between">
-        <span>GitHub context</span>
-        <div className="flex items-center gap-2">
-          {savedContext && injected.length > 0 && (
-            <span className="text-teal-500 text-xs normal-case">📌 pinned</span>
-          )}
-          {onClose && (
-            <button onClick={onClose} className="md:hidden text-zinc-600 hover:text-zinc-300 text-sm leading-none">✕</button>
-          )}
-        </div>
+    <div className="flex flex-col h-full">
+      {/* Search repos */}
+      <div className="px-3 py-2 border-b border-zinc-800">
+        <input
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search repos..."
+          className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-300 text-xs placeholder:text-zinc-600 focus:outline-none focus:border-teal-600"
+        />
       </div>
 
+      {/* Token bar */}
       {injected.length > 0 && <TokenBar tokens={tokenCount} />}
 
-      {injected.length > 0 && (
-        <div className="border-b border-zinc-800 px-3 py-2 max-h-44 overflow-y-auto">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-zinc-500">{injected.length} file{injected.length > 1 ? "s" : ""} in context</span>
-            <button onClick={clearAll} className="text-xs text-zinc-600 hover:text-red-400 transition-colors">clear all</button>
-          </div>
-          {injected.map((f) => (
-            <div key={f.path} className="flex items-center justify-between gap-1 py-0.5">
-              <span className="text-teal-400 text-xs truncate" title={`${f.repo}/${f.path}`}>
-                {f.path.split("/").pop()}
-              </span>
-              <button onClick={() => removeFile(f.path)} className="text-zinc-600 hover:text-zinc-300 text-xs flex-shrink-0">✕</button>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Main content */}
+      <div className="flex-1 overflow-y-auto mobile-scroll">
+        {error && (
+          <div className="px-3 py-2 text-red-400 text-xs">{error}</div>
+        )}
 
-      {!selectedRepo ? (
-        <div className="flex-1 overflow-y-auto px-2 py-2">
-          {loading && <div className="text-zinc-500 text-xs px-1">Loading repos…</div>}
-          {error && <div className="text-red-400 text-xs px-1">{error}</div>}
-          {repos.map((r) => (
-            <button key={r.full_name} onClick={() => browseRepo(r.full_name)}
-              className="w-full text-left px-2 py-1.5 rounded hover:bg-zinc-800 text-zinc-300 flex items-center gap-2">
-              <span className="text-zinc-500">{r.private ? "🔒" : "📂"}</span>
-              <span className="truncate">{r.name}</span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto flex flex-col">
-          <div className="px-3 py-2 border-b border-zinc-800 flex items-center gap-2 flex-wrap">
-            <button onClick={() => { setSelectedRepo(null); setTree([]); setPath(""); setPathHistory([]); }}
-              className="text-zinc-500 hover:text-zinc-200 text-xs">← repos</button>
-            {pathHistory.length > 0 && (
-              <button onClick={navigateBack} className="text-zinc-500 hover:text-zinc-200 text-xs">↑ up</button>
-            )}
-            <span className="text-zinc-500 text-xs truncate flex-1">{path || "/"}</span>
-          </div>
+        {loading && !selectedRepo && (
+          <div className="px-3 py-4 text-zinc-500 text-xs text-center">Loading repos...</div>
+        )}
 
-          <div className="px-2 py-2 border-b border-zinc-800 flex flex-col gap-1">
-            <button onClick={() => injectFolder({ path, name: path || "root" })} disabled={folderLoading !== null}
-              className="w-full text-xs px-2 py-1.5 rounded border border-zinc-700 hover:border-teal-700 hover:text-teal-300 text-zinc-400 transition-colors disabled:opacity-40 flex items-center justify-center gap-1">
-              {folderLoading === path ? <><span className="animate-spin">⟳</span> Loading…</> : <>📂 Inject this folder</>}
-            </button>
-            <button onClick={injectWholeRepo} disabled={folderLoading !== null}
-              className="w-full text-xs px-2 py-1.5 rounded border border-zinc-700 hover:border-purple-700 hover:text-purple-300 text-zinc-400 transition-colors disabled:opacity-40 flex items-center justify-center gap-1">
-              {folderLoading === "__root__" ? <><span className="animate-spin">⟳</span> Loading repo…</> : <>🗂 Inject whole repo</>}
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto px-2 py-2">
-            {loading && <div className="text-zinc-500 text-xs px-1">Loading…</div>}
-            {error && <div className="text-red-400 text-xs px-1">{error}</div>}
-            {tree.sort((a, b) => (a.type === "dir" ? -1 : 1) - (b.type === "dir" ? -1 : 1)).map((item) => (
-              <div key={item.sha + item.path} className="flex items-center gap-1">
-                {item.type === "dir" ? (
-                  <div className="flex-1 flex items-center gap-1">
-                    <button onClick={() => navigateInto(item)}
-                      className="flex-1 text-left px-2 py-1 rounded hover:bg-zinc-800 text-zinc-300 flex items-center gap-2">
-                      <span className="text-yellow-500">📁</span>
-                      <span className="truncate">{item.name}</span>
-                    </button>
-                    <button onClick={() => injectFolder(item)} disabled={folderLoading !== null}
-                      title={`Inject all files in ${item.name}`}
-                      className="px-1.5 py-1 text-zinc-600 hover:text-teal-400 disabled:opacity-30 text-xs rounded hover:bg-zinc-800 transition-colors flex-shrink-0">
-                      {folderLoading === item.path ? <span className="animate-spin inline-block">⟳</span> : "⊕"}
-                    </button>
-                  </div>
-                ) : (
-                  <button onClick={() => injectFile(item)}
-                    className={`flex-1 text-left px-2 py-1 rounded hover:bg-zinc-800 flex items-center gap-2 ${injected.find((f) => f.path === item.path) ? "text-teal-400" : "text-zinc-300"}`}>
-                    <span className="text-zinc-500">📄</span>
-                    <span className="truncate">{item.name}</span>
-                    {injected.find((f) => f.path === item.path) && <span className="text-teal-500 text-xs ml-auto flex-shrink-0">✓</span>}
-                  </button>
+        {/* Repo list */}
+        {!selectedRepo && !loading && (
+          <div className="space-y-0.5 p-2">
+            {filteredRepos.map((repo) => (
+              <button
+                key={repo.full_name}
+                onClick={() => browseRepo(repo.full_name)}
+                className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-zinc-800 transition-colors touch-target"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-400 text-xs">{repo.private ? "🔒" : "📂"}</span>
+                  <span className="text-zinc-200 text-sm font-medium truncate">{repo.name}</span>
+                </div>
+                {repo.description && (
+                  <p className="text-zinc-500 text-xs mt-0.5 truncate pl-6">{repo.description}</p>
                 )}
-              </div>
+              </button>
             ))}
+            {filteredRepos.length === 0 && (
+              <div className="px-3 py-4 text-zinc-500 text-xs text-center">
+                {searchQuery ? "No matching repos" : "No repos found"}
+              </div>
+            )}
           </div>
-        </div>
-      )}
-    </aside>
+        )}
+
+        {/* File browser */}
+        {selectedRepo && (
+          <div>
+            {/* Breadcrumb */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-zinc-900">
+              <button
+                onClick={() => {
+                  setSelectedRepo(null);
+                  setTree([]);
+                  setPath("");
+                  setPathHistory([]);
+                }}
+                className="text-zinc-500 hover:text-zinc-300 text-xs touch-target"
+              >
+                ← Repos
+              </button>
+              {pathHistory.length > 0 && (
+                <button
+                  onClick={navigateBack}
+                  className="text-zinc-500 hover:text-zinc-300 text-xs touch-target"
+                >
+                  ↑ Back
+                </button>
+              )}
+              <span className="text-zinc-400 text-xs truncate">{path || selectedRepo.split("/").pop()}</span>
+            </div>
+
+            {/* Inject all button */}
+            <div className="px-3 py-2 border-b border-zinc-800">
+              <button
+                onClick={injectWholeRepo}
+                disabled={folderLoading === "__root__"}
+                className="w-full text-left text-xs text-teal-400 hover:text-teal-300 py-2 touch-target"
+              >
+                {folderLoading === "__root__" ? "⟳ Loading..." : "📦 Inject entire repo"}
+              </button>
+            </div>
+
+            {/* Files */}
+            <div className="space-y-0.5 p-2">
+              {tree.map((item) => (
+                <div key={item.path} className="flex items-center gap-2">
+                  {item.type === "dir" ? (
+                    <button
+                      onClick={() => navigateInto(item)}
+                      className="flex-1 text-left px-3 py-2.5 rounded-lg hover:bg-zinc-800 transition-colors touch-target"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500">📁</span>
+                        <span className="text-zinc-300 text-sm">{item.name}</span>
+                      </div>
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => injectFile(item)}
+                        className="flex-1 text-left px-3 py-2.5 rounded-lg hover:bg-zinc-800 transition-colors touch-target"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-zinc-500">📄</span>
+                          <span className="text-zinc-300 text-sm truncate">{item.name}</span>
+                        </div>
+                      </button>
+                      {onTogglePinnedFile && pinnedFiles && selectedRepo && (
+                        <button
+                          onClick={() => onTogglePinnedFile(selectedRepo, item.path)}
+                          className={`p-2 rounded-lg touch-target ${
+                            pinnedFiles[selectedRepo]?.includes(item.path)
+                              ? "text-amber-400"
+                              : "text-zinc-600 hover:text-zinc-400"
+                          }`}
+                        >
+                          📌
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Injected files list */}
+        {injected.length > 0 && (
+          <div className="border-t border-zinc-800 mt-2">
+            <div className="flex items-center justify-between px-3 py-2">
+              <span className="text-zinc-400 text-xs">Injected files ({injected.length})</span>
+              <button
+                onClick={clearAll}
+                className="text-red-400 hover:text-red-300 text-xs touch-target"
+              >
+                Clear all
+              </button>
+            </div>
+            <div className="space-y-0.5 px-2 pb-2">
+              {injected.map((f) => (
+                <div key={f.path} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800/50">
+                  <span className="text-zinc-400 text-xs truncate flex-1">{f.path}</span>
+                  <button
+                    onClick={() => removeFile(f.path)}
+                    className="text-zinc-600 hover:text-red-400 text-xs p-1 touch-target"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
