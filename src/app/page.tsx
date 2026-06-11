@@ -821,46 +821,45 @@ export default function Home() {
               </div>
             )}
 
-            <div className="flex items-end gap-2">
-              {/* Local file attach */}
+            <div className="flex items-end gap-1.5">
+              {/* Compact attach button */}
               <LocalFileContext
+                compact
                 onFilesLoaded={(files) => setLocalFiles((prev) => [...prev, ...files])}
               />
 
-              <div className="flex-1 relative">
+              <div className="flex-1 relative min-w-0">
                 <textarea
                   ref={inputRef}
                   value={input}
                   onChange={(e) => {
                     setInput(e.target.value);
-                    // Auto-grow
                     e.target.style.height = "auto";
                     e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
                   }}
                   onFocus={() => {
-                    // Give keyboard time to open then scroll to bottom
                     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 320);
                   }}
                   onKeyDown={handleKeyDown}
                   placeholder={
-                    inputDisabled && agentMode && !activeRepo
+                    agentMode && !activeRepo
                       ? "Select a repo first →"
                       : agentMode
                       ? "Tell the agent what to do..."
-                      : "Ask anything about your code..."
+                      : "Ask anything..."
                   }
                   rows={1}
                   disabled={inputDisabled}
-                  className="input-field w-full px-3.5 py-3 text-sm placeholder:text-zinc-600 resize-none min-h-[46px] max-h-[120px] disabled:opacity-40"
+                  className="input-field w-full px-3.5 py-3 text-sm placeholder:text-zinc-600 resize-none min-h-[46px] max-h-[120px] disabled:opacity-40 block"
                   style={{ fontSize: "16px" }}
                 />
               </div>
 
               <button
                 onClick={() => sendMessage()}
-                disabled={!input.trim() || loading || inputDisabled}
-                className={`flex items-center justify-center rounded-xl px-4 py-3 text-sm font-medium transition-all flex-shrink-0 ${
-                  !input.trim() || loading || inputDisabled
+                disabled={!input.trim() || loading}
+                className={`flex items-center justify-center rounded-xl w-[46px] h-[46px] flex-shrink-0 transition-all ${
+                  !input.trim() || loading
                     ? "bg-zinc-800 text-zinc-600 cursor-not-allowed"
                     : agentMode
                     ? "bg-violet-700 hover:bg-violet-600 text-white"
