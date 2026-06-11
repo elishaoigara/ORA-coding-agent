@@ -109,6 +109,23 @@ export default function Home() {
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
+  const [kbHeight, setKbHeight] = useState(0);
+
+  // Track software keyboard height via visualViewport so input bar stays visible
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const gap = window.innerHeight - vv.height - vv.offsetTop;
+      setKbHeight(Math.max(0, gap));
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
 
   const {
     conversations, active, activeId, syncing,
@@ -766,8 +783,11 @@ export default function Home() {
         )}
 
         {/* ── Input bar ─────────────────────────────────────────────────── */}
-        <div className="border-t border-zinc-800 bg-zinc-900/90 backdrop-blur-sm pb-safe flex-shrink-0">
-          <div className="px-3 md:px-4 py-2.5">
+        <div
+          className="border-t border-zinc-800 bg-zinc-900/90 backdrop-blur-sm flex-shrink-0"
+          style={{ paddingBottom: kbHeight > 0 ? kbHeight : undefined }}
+        >
+          <div className="px-3 md:px-4 py-2.5 pb-safe">
 
             {/* Context chips */}
             {(injectedFiles.length > 0 || localFiles.length > 0 || agentMode || activeRepo) && (
@@ -811,7 +831,16 @@ export default function Home() {
                 <textarea
                   ref={inputRef}
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    // Auto-grow
+                    e.target.style.height = "auto";
+                    e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+                  }}
+                  onFocus={() => {
+                    // Give keyboard time to open then scroll to bottom
+                    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 320);
+                  }}
                   onKeyDown={handleKeyDown}
                   placeholder={
                     inputDisabled && agentMode && !activeRepo
