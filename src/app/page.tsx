@@ -812,7 +812,7 @@ export default function Home() {
               setCurrentPlan(null);
               setAgentPhase("idle");
             }}
-            executing={agentPhase === "executing"}
+            executing={false}
           />
         )}
 
