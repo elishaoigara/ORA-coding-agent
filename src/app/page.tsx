@@ -623,7 +623,10 @@ export default function Home() {
             >
               <IconMenu />
             </button>
-            <span className="text-zinc-300 text-sm font-medium truncate">
+            <span
+              className="text-zinc-300 text-sm font-medium truncate max-w-[140px] md:max-w-xs"
+              title={active?.title || "New chat"}
+            >
               {active?.title || "New chat"}
             </span>
             {syncing && <span className="text-zinc-600 text-xs animate-pulse flex-shrink-0">⟳</span>}
@@ -635,10 +638,11 @@ export default function Home() {
               onClick={() => setShowModelPicker((v) => !v)}
               className="model-pill"
               aria-label="Select model"
+              title={`${providerLabel} · ${modelLabel}`}
             >
-              <span className="max-w-[90px] truncate">{providerLabel}</span>
-              <span className="text-zinc-600">·</span>
-              <span className="max-w-[80px] truncate text-zinc-400">{modelLabel}</span>
+              <span className="max-w-[60px] truncate text-zinc-300">{providerLabel}</span>
+              <span className="text-zinc-600 flex-shrink-0">·</span>
+              <span className="max-w-[72px] truncate text-zinc-500">{modelLabel}</span>
               <IconChevron />
             </button>
 
@@ -939,8 +943,8 @@ export default function Home() {
                   }
                   rows={1}
                   disabled={inputDisabled}
-                  className="input-field w-full px-3.5 py-3 text-sm placeholder:text-zinc-600 resize-none min-h-[46px] max-h-[120px] disabled:opacity-40 block"
-                  style={{ fontSize: "16px" }}
+                  className="input-field w-full px-3.5 py-3 text-[15px] text-left placeholder:text-zinc-600 resize-none min-h-[46px] max-h-[120px] disabled:opacity-40 block"
+                  style={{ fontSize: "16px", textAlign: "left" }}
                 />
               </div>
 
