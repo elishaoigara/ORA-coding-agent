@@ -149,6 +149,7 @@ export default function Home() {
     conversations, active, activeId, syncing,
     newConversation, saveConversation, saveGitHubContext,
     loadConversation, deleteConversation, setProject, saveSystemPrompt,
+    forceSync,
   } = useConversations();
 
   useKeyboardShortcuts({
@@ -606,6 +607,8 @@ export default function Home() {
           onSelectConversation={(conv) => { loadConversation(conv.id); setShowHistory(false); }}
           onDeleteConversation={deleteConversation}
           currentConversationId={activeId ?? undefined}
+          syncing={syncing}
+          onForceSync={forceSync}
         />
       </div>
 
@@ -613,24 +616,24 @@ export default function Home() {
       <div className="flex-1 flex flex-col min-w-0">
 
         {/* ── Top bar ───────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-zinc-800 bg-zinc-900/90 backdrop-blur-sm flex-shrink-0">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-zinc-900/90 backdrop-blur-sm flex-shrink-0">
           {/* Left: menu + title */}
-          <div className="flex items-center gap-2 min-w-0">
-            <button
-              onClick={() => setShowHistory((v) => !v)}
-              className="touch-target text-zinc-500 hover:text-zinc-200 md:hidden flex-shrink-0"
-              aria-label="History"
-            >
-              <IconMenu />
-            </button>
-            <span
-              className="text-zinc-300 text-sm font-medium truncate max-w-[140px] md:max-w-xs"
-              title={active?.title || "New chat"}
-            >
-              {active?.title || "New chat"}
-            </span>
-            {syncing && <span className="text-zinc-600 text-xs animate-pulse flex-shrink-0">⟳</span>}
-          </div>
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            className="touch-target text-zinc-500 hover:text-zinc-200 md:hidden flex-shrink-0"
+            aria-label="History"
+          >
+            <IconMenu />
+          </button>
+          <span
+            className="text-zinc-300 text-sm font-medium truncate flex-1 min-w-0"
+            title={active?.title || "New chat"}
+          >
+            {active?.title || "New chat"}
+          </span>
+          {syncing && (
+            <span className="text-violet-400 text-xs flex-shrink-0 animate-pulse">↕</span>
+          )}
 
           {/* Right: model pill + mode + github + new */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -640,9 +643,10 @@ export default function Home() {
               aria-label="Select model"
               title={`${providerLabel} · ${modelLabel}`}
             >
-              <span className="max-w-[60px] truncate text-zinc-300">{providerLabel}</span>
-              <span className="text-zinc-600 flex-shrink-0">·</span>
-              <span className="max-w-[72px] truncate text-zinc-500">{modelLabel}</span>
+              {/* On mobile show only provider to save space */}
+              <span className="max-w-[52px] truncate text-zinc-300">{providerLabel}</span>
+              <span className="hidden sm:inline text-zinc-600 flex-shrink-0">·</span>
+              <span className="hidden sm:inline max-w-[72px] truncate text-zinc-500">{modelLabel}</span>
               <IconChevron />
             </button>
 
@@ -780,25 +784,28 @@ export default function Home() {
         {/* ── Messages ─────────────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto px-3 md:px-6 py-4 space-y-4 mobile-scroll">
           {messages.length === 0 && !loading && (
-            <div className="flex flex-col items-center justify-center h-full text-center px-4 gap-5">
+            <div className="flex flex-col items-center justify-center h-full text-center px-4 gap-4 py-8">
+              {/* Hero — smaller on mobile */}
               <div>
-                <h1 className="text-3xl font-bold text-zinc-100 tracking-tight">ORA</h1>
-                <p className="text-zinc-600 text-sm mt-1">
-                  {agentMode ? "Agent mode — select a repo to begin" : "Your AI coding agent"}
+                <h1 className="text-4xl font-extrabold text-zinc-100 tracking-tight">ORA</h1>
+                <p className="text-zinc-500 text-sm mt-1">
+                  {agentMode ? "Agent mode — connect a repo to begin" : "Your AI coding agent"}
                 </p>
               </div>
 
+              {/* Model pill */}
               <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-full text-xs text-zinc-500">
                 <span className="w-1.5 h-1.5 rounded-full bg-teal-500 flex-shrink-0" />
-                {providerLabel} · {modelLabel}
+                <span className="truncate max-w-[180px]">{providerLabel} · {modelLabel}</span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-md">
+              {/* Prompt chips — 2-col even on mobile */}
+              <div className="grid grid-cols-2 gap-2 w-full max-w-sm mt-1">
                 {(agentMode ? AGENT_PROMPTS : QUICK_PROMPTS).map((prompt, i) => (
                   <button
                     key={i}
                     onClick={() => sendMessage(prompt)}
-                    className="text-left text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-xl p-3.5 hover:bg-zinc-800 hover:border-zinc-700 hover:text-zinc-200 transition-all leading-relaxed"
+                    className="text-left text-xs text-zinc-400 bg-zinc-900/80 border border-zinc-800 rounded-2xl p-3 hover:bg-zinc-800 hover:border-zinc-700 hover:text-zinc-200 active:scale-95 transition-all leading-relaxed"
                   >
                     {prompt}
                   </button>
@@ -808,7 +815,7 @@ export default function Home() {
               {agentMode && !activeRepo && (
                 <button
                   onClick={() => setShowGitHub(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-teal-900/30 border border-teal-700/50 rounded-xl text-teal-400 text-sm hover:bg-teal-900/50 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2.5 bg-teal-900/30 border border-teal-700/50 rounded-xl text-teal-400 text-sm hover:bg-teal-900/50 active:scale-95 transition-all"
                 >
                   <IconGitHub />
                   Connect a repository

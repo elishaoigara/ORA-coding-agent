@@ -6,8 +6,9 @@ export type { Conversation };
 
 const LS_KEY      = "codeagent:conversations";
 const LS_GIST_KEY = "codeagent:gistId";
+const POLL_MS     = 30_000; // poll remote every 30 s for cross-device sync
 
-// Bug fix #9: guard localStorage access for SSR safety
+// ── SSR-safe localStorage helpers ────────────────────────────────────────────
 function lsLoad(): Conversation[] {
   if (typeof window === "undefined") return [];
   try { return JSON.parse(localStorage.getItem(LS_KEY) ?? "[]"); } catch { return []; }
@@ -16,13 +17,21 @@ function lsSave(c: Conversation[]) {
   if (typeof window === "undefined") return;
   try { localStorage.setItem(LS_KEY, JSON.stringify(c)); } catch { /* quota */ }
 }
+function lsGetString(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function lsSetString(key: string, value: string) {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(key, value); } catch { /* quota */ }
+}
 
 export function autoTitle(messages: Message[]): string {
   const first = messages.find((m) => m.role === "user")?.content ?? "New chat";
   return first.slice(0, 52) + (first.length > 52 ? "…" : "");
 }
 
-function merge(local: Conversation[], remote: Conversation[]): Conversation[] {
+function mergeLocal(local: Conversation[], remote: Conversation[]): Conversation[] {
   const byId = new Map(remote.map((c) => [c.id, c]));
   for (const lc of local) {
     const rc = byId.get(lc.id);
@@ -31,33 +40,25 @@ function merge(local: Conversation[], remote: Conversation[]): Conversation[] {
   return Array.from(byId.values()).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-// UI improvement #6: generate a better title via a quick AI call
-// Runs fire-and-forget after the first assistant reply
+// ── Smart title via /api/chat ─────────────────────────────────────────────────
 async function generateSmartTitle(userMessage: string, assistantReply: string): Promise<string | null> {
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-app-password": "local" },
       body: JSON.stringify({
-        messages: [
-          {
-            role: "user",
-            content: `Summarise this conversation in 5 words or fewer. Reply with ONLY the title, no punctuation, no quotes.\n\nUser: ${userMessage.slice(0, 200)}\nAssistant: ${assistantReply.slice(0, 200)}`,
-          },
-        ],
-        provider: "auto",
-        model: "",
-        injectedFiles: [],
+        messages: [{
+          role: "user",
+          content: `Summarise this conversation in 5 words or fewer. Reply with ONLY the title, no punctuation, no quotes.\n\nUser: ${userMessage.slice(0, 200)}\nAssistant: ${assistantReply.slice(0, 200)}`,
+        }],
+        provider: "auto", model: "", injectedFiles: [],
       }),
     });
     if (!res.ok) return null;
-
     const reader  = res.body?.getReader();
     if (!reader) return null;
     const decoder = new TextDecoder();
-    let title     = "";
-    let buf       = "";
-
+    let title = "", buf = "";
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -66,70 +67,97 @@ async function generateSmartTitle(userMessage: string, assistantReply: string): 
       buf = lines.pop() ?? "";
       for (const line of lines) {
         if (!line.startsWith("data: ") || line === "data: [DONE]") continue;
-        try {
-          const parsed = JSON.parse(line.slice(6));
-          title += parsed.choices?.[0]?.delta?.content ?? "";
-        } catch { /* partial */ }
+        try { title += JSON.parse(line.slice(6)).choices?.[0]?.delta?.content ?? ""; } catch { /* */ }
       }
     }
-    const clean = title.trim().replace(/["""'']/g, "").slice(0, 60);
-    return clean || null;
+    return title.trim().replace(/["""'']/g, "").slice(0, 60) || null;
   } catch {
     return null;
   }
 }
 
+// ── Hook ──────────────────────────────────────────────────────────────────────
 export function useConversations() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeId, setActiveId]           = useState<string | null>(null);
-  const [syncing, setSyncing]             = useState(false);
-  const gistIdRef = useRef<string | null>(null);
-  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [activeId,      setActiveId]      = useState<string | null>(null);
+  const [syncing,       setSyncing]       = useState(false);
+  const [lastSyncedAt,  setLastSyncedAt]  = useState<number | null>(null);
+  const gistIdRef  = useRef<string | null>(null);
+  const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollTimer  = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    const local = lsLoad();
-    setConversations(local);
-    // Bug fix #9: safe localStorage access
-    if (typeof window !== "undefined") {
-      gistIdRef.current = localStorage.getItem(LS_GIST_KEY) ?? null;
-    }
-    setSyncing(true);
-    const qs = gistIdRef.current ? `?gistId=${gistIdRef.current}` : "";
-    fetch(`/api/conversations${qs}`)
-      .then((r) => r.json())
-      .then(({ conversations: remote, gistId }) => {
-        if (gistId) {
-          gistIdRef.current = gistId;
-          if (typeof window !== "undefined") localStorage.setItem(LS_GIST_KEY, gistId);
-        }
-        if (!Array.isArray(remote) || remote.length === 0) return;
-        setConversations((prev) => { const merged = merge(prev, remote); lsSave(merged); return merged; });
-      })
-      .catch(() => {})
-      .finally(() => setSyncing(false));
+  // ── Remote fetch (read-merge-apply) ────────────────────────────────────────
+  const fetchRemote = useCallback(async (silent = false) => {
+    if (!silent) setSyncing(true);
+    try {
+      const qs  = gistIdRef.current ? `?gistId=${gistIdRef.current}` : "";
+      const res = await fetch(`/api/conversations${qs}`);
+      if (!res.ok) return;
+      const { conversations: remote, gistId, syncedAt } = await res.json();
+      if (gistId) {
+        gistIdRef.current = gistId;
+        lsSetString(LS_GIST_KEY, gistId);
+      }
+      if (Array.isArray(remote) && remote.length > 0) {
+        setConversations((prev) => {
+          const merged = mergeLocal(prev, remote as Conversation[]);
+          lsSave(merged);
+          return merged;
+        });
+      }
+      if (syncedAt) setLastSyncedAt(syncedAt);
+    } catch { /* network unavailable */ }
+    finally { if (!silent) setSyncing(false); }
   }, []);
 
+  // ── Remote save (debounced, read-merge-write) ───────────────────────────────
   const remoteSave = useCallback((updated: Conversation[]) => {
-    if (syncTimer.current) clearTimeout(syncTimer.current);
-    syncTimer.current = setTimeout(() => {
-      fetch("/api/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversations: updated, gistId: gistIdRef.current }),
-      })
-        .then((r) => r.json())
-        .then(({ gistId }) => {
-          if (gistId) {
-            gistIdRef.current = gistId;
-            if (typeof window !== "undefined") localStorage.setItem(LS_GIST_KEY, gistId);
-          }
-        })
-        .catch(() => {});
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/conversations", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ conversations: updated, gistId: gistIdRef.current }),
+        });
+        if (!res.ok) return;
+        const { gistId, syncedAt, conversations: merged } = await res.json();
+        if (gistId) {
+          gistIdRef.current = gistId;
+          lsSetString(LS_GIST_KEY, gistId);
+        }
+        // Apply any remote changes the server merged in
+        if (Array.isArray(merged)) {
+          setConversations((prev) => {
+            const final = mergeLocal(prev, merged as Conversation[]);
+            lsSave(final);
+            return final;
+          });
+        }
+        if (syncedAt) setLastSyncedAt(syncedAt);
+      } catch { /* offline */ }
     }, 1200);
   }, []);
 
+  // ── Boot: load local then remote ───────────────────────────────────────────
+  useEffect(() => {
+    const local = lsLoad();
+    setConversations(local);
+    gistIdRef.current = lsGetString(LS_GIST_KEY);
+    fetchRemote();
+
+    // Poll for cross-device changes every 30 s
+    pollTimer.current = setInterval(() => fetchRemote(true), POLL_MS);
+    return () => {
+      if (pollTimer.current) clearInterval(pollTimer.current);
+    };
+  }, [fetchRemote]);
+
+  // ── Selectors ──────────────────────────────────────────────────────────────
   const active = conversations.find((c) => c.id === activeId) ?? null;
-  const newConversation = useCallback(() => { setActiveId(null); }, []);
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+  const newConversation = useCallback(() => setActiveId(null), []);
 
   const saveConversation = useCallback(
     (messages: Message[], provider: string, model: string, project = "", githubContext?: GitHubContext) => {
@@ -153,19 +181,15 @@ export function useConversations() {
           updated = [nc, ...prev];
           setActiveId(nc.id);
 
-          // UI improvement #6: kick off smart title generation after first reply
+          // Fire-and-forget smart title
           const userMsg   = messages.find((m) => m.role === "user")?.content ?? "";
           const assistMsg = messages.find((m) => m.role === "assistant")?.content ?? "";
           if (userMsg && assistMsg) {
             generateSmartTitle(userMsg, assistMsg).then((smartTitle) => {
               if (!smartTitle) return;
               setConversations((prev2) => {
-                const u = prev2.map((c) =>
-                  c.id === nc.id ? { ...c, title: smartTitle } : c
-                );
-                lsSave(u);
-                remoteSave(u);
-                return u;
+                const u = prev2.map((c) => c.id === nc.id ? { ...c, title: smartTitle } : c);
+                lsSave(u); remoteSave(u); return u;
               });
             });
           }
@@ -192,7 +216,7 @@ export function useConversations() {
     [activeId, remoteSave]
   );
 
-  const loadConversation = useCallback((id: string) => { setActiveId(id); }, []);
+  const loadConversation = useCallback((id: string) => setActiveId(id), []);
 
   const deleteConversation = useCallback((id: string) => {
     setConversations((prev) => {
@@ -229,8 +253,9 @@ export function useConversations() {
   );
 
   return {
-    conversations, active, activeId, syncing,
+    conversations, active, activeId, syncing, lastSyncedAt,
     newConversation, saveConversation, saveGitHubContext,
     loadConversation, deleteConversation, setProject, saveSystemPrompt,
+    forceSync: () => fetchRemote(false),
   };
 }
