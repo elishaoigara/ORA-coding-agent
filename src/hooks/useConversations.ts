@@ -7,10 +7,13 @@ export type { Conversation };
 const LS_KEY      = "codeagent:conversations";
 const LS_GIST_KEY = "codeagent:gistId";
 
+// Bug fix #9: guard localStorage access for SSR safety
 function lsLoad(): Conversation[] {
+  if (typeof window === "undefined") return [];
   try { return JSON.parse(localStorage.getItem(LS_KEY) ?? "[]"); } catch { return []; }
 }
 function lsSave(c: Conversation[]) {
+  if (typeof window === "undefined") return;
   try { localStorage.setItem(LS_KEY, JSON.stringify(c)); } catch { /* quota */ }
 }
 
@@ -28,6 +31,54 @@ function merge(local: Conversation[], remote: Conversation[]): Conversation[] {
   return Array.from(byId.values()).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+// UI improvement #6: generate a better title via a quick AI call
+// Runs fire-and-forget after the first assistant reply
+async function generateSmartTitle(userMessage: string, assistantReply: string): Promise<string | null> {
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-app-password": "local" },
+      body: JSON.stringify({
+        messages: [
+          {
+            role: "user",
+            content: `Summarise this conversation in 5 words or fewer. Reply with ONLY the title, no punctuation, no quotes.\n\nUser: ${userMessage.slice(0, 200)}\nAssistant: ${assistantReply.slice(0, 200)}`,
+          },
+        ],
+        provider: "auto",
+        model: "",
+        injectedFiles: [],
+      }),
+    });
+    if (!res.ok) return null;
+
+    const reader  = res.body?.getReader();
+    if (!reader) return null;
+    const decoder = new TextDecoder();
+    let title     = "";
+    let buf       = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ") || line === "data: [DONE]") continue;
+        try {
+          const parsed = JSON.parse(line.slice(6));
+          title += parsed.choices?.[0]?.delta?.content ?? "";
+        } catch { /* partial */ }
+      }
+    }
+    const clean = title.trim().replace(/["""'']/g, "").slice(0, 60);
+    return clean || null;
+  } catch {
+    return null;
+  }
+}
+
 export function useConversations() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId]           = useState<string | null>(null);
@@ -38,13 +89,19 @@ export function useConversations() {
   useEffect(() => {
     const local = lsLoad();
     setConversations(local);
-    gistIdRef.current = localStorage.getItem(LS_GIST_KEY) ?? null;
+    // Bug fix #9: safe localStorage access
+    if (typeof window !== "undefined") {
+      gistIdRef.current = localStorage.getItem(LS_GIST_KEY) ?? null;
+    }
     setSyncing(true);
     const qs = gistIdRef.current ? `?gistId=${gistIdRef.current}` : "";
-fetch(`/api/conversations${qs}`)
+    fetch(`/api/conversations${qs}`)
       .then((r) => r.json())
       .then(({ conversations: remote, gistId }) => {
-        if (gistId) { gistIdRef.current = gistId; localStorage.setItem(LS_GIST_KEY, gistId); }
+        if (gistId) {
+          gistIdRef.current = gistId;
+          if (typeof window !== "undefined") localStorage.setItem(LS_GIST_KEY, gistId);
+        }
         if (!Array.isArray(remote) || remote.length === 0) return;
         setConversations((prev) => { const merged = merge(prev, remote); lsSave(merged); return merged; });
       })
@@ -62,7 +119,10 @@ fetch(`/api/conversations${qs}`)
       })
         .then((r) => r.json())
         .then(({ gistId }) => {
-          if (gistId) { gistIdRef.current = gistId; localStorage.setItem(LS_GIST_KEY, gistId); }
+          if (gistId) {
+            gistIdRef.current = gistId;
+            if (typeof window !== "undefined") localStorage.setItem(LS_GIST_KEY, gistId);
+          }
         })
         .catch(() => {});
     }, 1200);
@@ -92,6 +152,23 @@ fetch(`/api/conversations${qs}`)
           };
           updated = [nc, ...prev];
           setActiveId(nc.id);
+
+          // UI improvement #6: kick off smart title generation after first reply
+          const userMsg   = messages.find((m) => m.role === "user")?.content ?? "";
+          const assistMsg = messages.find((m) => m.role === "assistant")?.content ?? "";
+          if (userMsg && assistMsg) {
+            generateSmartTitle(userMsg, assistMsg).then((smartTitle) => {
+              if (!smartTitle) return;
+              setConversations((prev2) => {
+                const u = prev2.map((c) =>
+                  c.id === nc.id ? { ...c, title: smartTitle } : c
+                );
+                lsSave(u);
+                remoteSave(u);
+                return u;
+              });
+            });
+          }
         }
         lsSave(updated);
         remoteSave(updated);

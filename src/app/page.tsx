@@ -38,6 +38,16 @@ interface ContinueEvent {
   progress?: string;
 }
 
+// Bug fix #9: SSR-safe localStorage helpers
+function lsGet(key: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+}
+function lsSet(key: string, value: string) {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(key, value); } catch { /* quota */ }
+}
+
 // Icons
 const IconMenu = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -69,6 +79,11 @@ const IconX = () => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
   </svg>
 );
+const IconStop = () => (
+  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+    <rect x="4" y="4" width="16" height="16" rx="2" />
+  </svg>
+);
 
 export default function Home() {
   const [messages, setMessages]           = useState<Message[]>([]);
@@ -89,6 +104,7 @@ export default function Home() {
   const [agentMode, setAgentMode]         = useState(false);
   const [agentPhase, setAgentPhase]       = useState<AgentPhase>("idle");
   const [agentStatus, setAgentStatus]     = useState("");
+  const [agentIteration, setAgentIteration] = useState(0); // UI improvement #1
   const [currentPlan, setCurrentPlan]     = useState<AgentPlan | null>(null);
   const [currentTask, setCurrentTask]     = useState("");
   const [stagedFiles, setStagedFiles]     = useState<StagedFile[]>([]);
@@ -98,20 +114,22 @@ export default function Home() {
   const [convUsage, setConvUsage]         = useState<TokenUsage | null>(null);
   const [systemPrompt, setSystemPrompt]   = useState("");
   const [branchFirst, setBranchFirst]     = useState(false);
-  const [agentBranch, setAgentBranch]     = useState("");
+  const [agentBranch, setAgentBranch]     = useState(""); // UI improvement #7
 
+  // Bug fix #9: SSR-safe localStorage initialisation
   const [snippets, setSnippets] = useState<{id:string;label:string;lang:string;code:string}[]>(() => {
-    try { return JSON.parse(localStorage.getItem("codeagent:snippets") ?? "[]"); } catch { return []; }
+    try { return JSON.parse(lsGet("codeagent:snippets", "[]")); } catch { return []; }
   });
   const [pinnedFiles, setPinnedFiles] = useState<Record<string,string[]>>(() => {
-    try { return JSON.parse(localStorage.getItem("codeagent:pinnedFiles") ?? "{}"); } catch { return {}; }
+    try { return JSON.parse(lsGet("codeagent:pinnedFiles", "{}")); } catch { return {}; }
   });
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
   const [kbHeight, setKbHeight] = useState(0);
+  const abortRef  = useRef<AbortController | null>(null); // for future cancel support
 
-  // Track software keyboard height via visualViewport so input bar stays visible
+  // Track software keyboard height via visualViewport
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -148,6 +166,7 @@ export default function Home() {
       .then((data: PublicProvider[]) => setProviders(data));
   }, []);
 
+  // Bug fix #8: providers in deps array so model resolves correctly after fetch
   useEffect(() => {
     if (active) {
       setMessages(active.messages);
@@ -169,7 +188,7 @@ export default function Home() {
       setInjectedFiles([]);
       setActiveRepo("");
     }
-  }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeId, providers]); // Bug fix #8: added `providers`
 
   function handleProviderChange(providerId: string) {
     setSelectedProviderId(providerId);
@@ -307,7 +326,9 @@ export default function Home() {
       for (const line of rawLines.filter((l) => l.startsWith("data: "))) {
         try {
           const event = JSON.parse(line.slice(6));
-          if (event.type === "progress" || event.type === "tool_call") setAgentStatus(event.text ?? "");
+          if (event.type === "progress" || event.type === "tool_call") {
+            setAgentStatus(event.text ?? "");
+          }
           if (event.type === "text") {
             agentText += event.text ?? "";
             setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: agentText }]);
@@ -341,7 +362,7 @@ export default function Home() {
             if (!agentText.trim()) {
               const fallback = staged.length > 0
                 ? "Execution complete. Review the staged changes below and push when ready."
-                : "⚠️ Agent finished but staged no files. Try switching to DeepSeek V3 or re-run the task.";
+                : "⚠️ Agent finished but staged no files. Try switching to DeepSeek V4 Flash or re-run the task.";
               agentText = fallback;
               setMessages((m) => {
                 const last = m[m.length - 1];
@@ -386,7 +407,7 @@ export default function Home() {
         phase:             params.phase,
         plan:              params.plan,
         provider:          isAuto ? "qwen" : selectedProviderId,
-        model:             isAuto ? "qwen3-coder-plus" : selectedModel === "deepseek-reasoner" ? "deepseek-chat" : selectedModel,
+        model:             isAuto ? "qwen3-coder-plus" : selectedModel === "deepseek-reasoner" ? "deepseek-v4-flash" : selectedModel,
         resumeMessages:    params.resumeMessages,
         resumeStagedFiles: params.resumeStagedFiles,
       }),
@@ -418,6 +439,7 @@ export default function Home() {
     setCurrentTask(userText);
     setCurrentPlan(null);
     setStagedFiles([]);
+    setAgentIteration(0);
     setAgentPhase("planning");
     setLoading(true);
     const newMessages: Message[] = [...messages, { role: "user", content: userText }];
@@ -444,6 +466,7 @@ export default function Home() {
     setLoading(true);
     setStagedFiles([]);
     setCurrentPlan(null);
+    setAgentIteration(0);
     const taskSnapshot = currentTask;
     const approvalMsg: Message = { role: "user", content: "✓ Plan approved — execute it now." };
     const newMessages = [...messages, approvalMsg];
@@ -457,6 +480,7 @@ export default function Home() {
     try {
       while (batchCount < MAX_BATCHES) {
         batchCount++;
+        setAgentIteration(batchCount); // UI improvement #1: track iteration
         const res = await callAgentApi({ phase: "execute", task: taskSnapshot, plan: approvedPlan, resumeMessages, resumeStagedFiles });
         if (!res.ok) { const err = await res.json(); throw new Error(err.error ?? "Agent request failed"); }
         const { agentText, staged, continuePayload } = await readAgentStream(res);
@@ -476,6 +500,19 @@ export default function Home() {
         }
         break;
       }
+
+      // Bug fix #3: warn user if MAX_BATCHES was hit without completion
+      if (batchCount >= MAX_BATCHES) {
+        setMessages((m) => {
+          const last = m[m.length - 1];
+          const warning = "\n\n⚠️ Reached the maximum batch limit. Some changes may be incomplete — review staged files carefully.";
+          if (last?.role === "assistant") {
+            return [...m.slice(0, -1), { ...last, content: last.content + warning }];
+          }
+          return [...m, { role: "assistant", content: warning }];
+        });
+      }
+
       setAgentPhase("done");
       saveConversation([...newMessages, { role: "assistant", content: finalText }], selectedProviderId, selectedModel, active?.project ?? projectInput);
     } catch (e) {
@@ -484,11 +521,13 @@ export default function Home() {
     } finally {
       setLoading(false);
       setAgentStatus("");
+      setAgentIteration(0);
     }
   }
 
   async function sendMessage(text?: string) {
     const userText = (text ?? input).trim();
+    // Bug fix #2: explicitly check isAgentBusy, don't just rely on loading flag
     if (!userText || loading || isAgentBusy) return;
     setInput("");
     if (agentMode) await startPlanning(userText);
@@ -503,7 +542,7 @@ export default function Home() {
     newConversation();
     setMessages([]); setRoutingBadges({}); setProjectInput(""); setSystemPrompt("");
     setInjectedFiles([]); setActiveRepo(""); setStagedFiles([]); setCurrentPlan(null);
-    setAgentPhase("idle"); setConvUsage(null); setAgentBranch("");
+    setAgentPhase("idle"); setConvUsage(null); setAgentBranch(""); setAgentIteration(0);
   }
 
   function saveSnippet(lang: string, code: string) {
@@ -511,7 +550,7 @@ export default function Home() {
     if (!label.trim()) return;
     const updated = [...snippets, { id: crypto.randomUUID(), label: label.trim(), lang, code }];
     setSnippets(updated);
-    localStorage.setItem("codeagent:snippets", JSON.stringify(updated));
+    lsSet("codeagent:snippets", JSON.stringify(updated));
   }
 
   const closeAll = useCallback(() => {
@@ -520,14 +559,22 @@ export default function Home() {
 
   useEffect(() => { closeAll(); }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Bug fix #2: explicit isAgentBusy check
   const isAgentBusy   = agentPhase === "planning" || agentPhase === "executing";
-  const inputDisabled = loading || (agentMode && !activeRepo) || agentPhase === "awaiting_approval";
+  const inputDisabled = loading || isAgentBusy || (agentMode && !activeRepo) || agentPhase === "awaiting_approval";
 
   // Model label for pill
   const modelLabel = isAuto
     ? "Auto"
     : (activeProvider?.models.find((m) => m.id === selectedModel)?.label ?? selectedModel ?? "Model");
   const providerLabel = isAuto ? "Auto" : (activeProvider?.name ?? selectedProviderId);
+
+  // UI improvement #1: format agent progress label
+  const agentProgressLabel = agentPhase === "planning"
+    ? "Planning…"
+    : agentPhase === "executing"
+    ? `Executing${agentIteration > 1 ? ` (batch ${agentIteration})` : ""}…`
+    : "";
 
   return (
     <div className="flex h-dvh bg-zinc-950 overflow-hidden">
@@ -538,7 +585,7 @@ export default function Home() {
       )}
 
       {/* ── History sidebar ───────────────────────────────────────────────── */}
-      <div className={`sidebar-left ${showHistory ? "open" : ""} md:static md:transform-none md:w-60 md:flex md:flex-col md:border-r md:border-zinc-800 md:bg-transparent`}>
+      <div className={`sidebar-left ${showHistory ? "open" : ""} md:static md:transform-none md:visible md:w-60 md:flex md:flex-col md:border-r md:border-zinc-800 md:bg-transparent`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 flex-shrink-0">
           <span className="text-zinc-100 text-sm font-semibold tracking-tight">History</span>
           <div className="flex items-center gap-1">
@@ -584,7 +631,6 @@ export default function Home() {
 
           {/* Right: model pill + mode + github + new */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            {/* Model/provider pill — always visible */}
             <button
               onClick={() => setShowModelPicker((v) => !v)}
               className="model-pill"
@@ -596,7 +642,6 @@ export default function Home() {
               <IconChevron />
             </button>
 
-            {/* Agent / Chat toggle */}
             <button
               onClick={() => setAgentMode((v) => !v)}
               className={`touch-target rounded-lg px-2.5 text-xs font-medium transition-colors ${
@@ -609,7 +654,6 @@ export default function Home() {
               {agentMode ? "Agent" : "Chat"}
             </button>
 
-            {/* GitHub */}
             <button
               onClick={() => setShowGitHub((v) => !v)}
               className={`touch-target rounded-lg transition-colors ${
@@ -620,7 +664,6 @@ export default function Home() {
               <IconGitHub />
             </button>
 
-            {/* New chat (desktop) */}
             <button
               onClick={handleNewChat}
               className="touch-target text-zinc-500 hover:text-zinc-200 hidden md:flex"
@@ -630,6 +673,29 @@ export default function Home() {
             </button>
           </div>
         </div>
+
+        {/* ── Agent progress bar (UI improvement #1) ───────────────────── */}
+        {isAgentBusy && (
+          <div className="flex-shrink-0 border-b border-zinc-800 bg-zinc-900/80">
+            <div className="agent-progress-bar" />
+            <div className="flex items-center gap-3 px-4 py-2">
+              <div className="flex gap-1">
+                <div className="thinking-dot" />
+                <div className="thinking-dot" />
+                <div className="thinking-dot" />
+              </div>
+              <span className="text-zinc-400 text-xs font-medium">{agentProgressLabel}</span>
+              {agentStatus && (
+                <span className="text-zinc-500 text-xs truncate max-w-[300px] flex-1">{agentStatus}</span>
+              )}
+              {agentIteration > 0 && (
+                <span className="text-zinc-600 text-xs ml-auto">
+                  {agentIteration}/{20} batches
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* ── Model picker dropdown ─────────────────────────────────────── */}
         {showModelPicker && (
@@ -659,24 +725,35 @@ export default function Home() {
                   <div className="px-3 pt-3 pb-1 text-xs text-zinc-600 font-medium uppercase tracking-wider">
                     {p.name} {!p.configured && <span className="text-zinc-700">(not configured)</span>}
                   </div>
-                  {p.models.map((m) => (
-                    <button
-                      key={m.id}
-                      disabled={!p.configured}
-                      onClick={() => {
-                        setSelectedProviderId(p.id);
-                        setSelectedModel(m.id);
-                        setShowModelPicker(false);
-                      }}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
-                        selectedProviderId === p.id && selectedModel === m.id
-                          ? "bg-violet-800/40 text-violet-200 border border-violet-700/50"
-                          : "text-zinc-300 hover:bg-zinc-800"
-                      }`}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
+                  {p.models.map((m) => {
+                    // UI improvement #4: show context window from label
+                    const ctxMatch = m.label.match(/\(([^)]+ctx[^)]*)\)/i);
+                    const ctxHint  = ctxMatch ? ctxMatch[1] : null;
+                    const baseLabel = ctxMatch ? m.label.replace(/\s*\([^)]+ctx[^)]*\)/i, "").trim() : m.label;
+                    return (
+                      <button
+                        key={m.id}
+                        disabled={!p.configured}
+                        onClick={() => {
+                          setSelectedProviderId(p.id);
+                          setSelectedModel(m.id);
+                          setShowModelPicker(false);
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                          selectedProviderId === p.id && selectedModel === m.id
+                            ? "bg-violet-800/40 text-violet-200 border border-violet-700/50"
+                            : "text-zinc-300 hover:bg-zinc-800"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span>{baseLabel}</span>
+                          {ctxHint && (
+                            <span className="text-zinc-600 text-xs flex-shrink-0">{ctxHint}</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               ))}
             </div>
@@ -707,7 +784,6 @@ export default function Home() {
                 </p>
               </div>
 
-              {/* Current model indicator */}
               <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-full text-xs text-zinc-500">
                 <span className="w-1.5 h-1.5 rounded-full bg-teal-500 flex-shrink-0" />
                 {providerLabel} · {modelLabel}
@@ -746,16 +822,14 @@ export default function Home() {
             />
           ))}
 
-          {loading && (
+          {/* Loading dots — only shown when NOT in agent mode (agent has the top bar) */}
+          {loading && !isAgentBusy && (
             <div className="flex items-center gap-3 px-4 py-3">
               <div className="flex gap-1">
                 <div className="thinking-dot" />
                 <div className="thinking-dot" />
                 <div className="thinking-dot" />
               </div>
-              {agentStatus && (
-                <span className="text-zinc-500 text-xs truncate max-w-[200px]">{agentStatus}</span>
-              )}
             </div>
           )}
 
@@ -767,7 +841,13 @@ export default function Home() {
           <StagedChanges
             files={stagedFiles}
             repo={activeRepo}
-            onPush={() => {}}
+            onPush={(pushedFiles) => {
+              // Bug fix #6: properly clear pushed files from staged state
+              setStagedFiles((prev) => {
+                const pushedPaths = new Set(pushedFiles.map((f) => f.path));
+                return prev.filter((f) => !pushedPaths.has(f.path));
+              });
+            }}
             onDiscard={() => setStagedFiles([])}
           />
         )}
@@ -790,12 +870,21 @@ export default function Home() {
           <div className="px-3 md:px-4 py-2.5 pb-safe">
 
             {/* Context chips */}
-            {(injectedFiles.length > 0 || localFiles.length > 0 || agentMode || activeRepo) && (
+            {(injectedFiles.length > 0 || localFiles.length > 0 || agentMode || activeRepo || agentBranch) && (
               <div className="flex items-center gap-1.5 mb-2 overflow-x-auto pb-1 scrollbar-hide">
                 {activeRepo && (
                   <span className="flex items-center gap-1 text-xs text-teal-400 bg-teal-900/30 border border-teal-800/50 rounded-full px-2.5 py-1 whitespace-nowrap flex-shrink-0">
                     <IconGitHub />
                     {activeRepo.split("/").pop()}
+                  </span>
+                )}
+                {/* UI improvement #7: show agent branch chip when branchFirst is active */}
+                {agentBranch && (
+                  <span className="flex items-center gap-1 text-xs text-violet-400 bg-violet-900/30 border border-violet-800/50 rounded-full px-2.5 py-1 whitespace-nowrap flex-shrink-0">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                    </svg>
+                    {agentBranch}
                   </span>
                 )}
                 {injectedFiles.length > 0 && (
@@ -813,6 +902,7 @@ export default function Home() {
                     Agent
                   </span>
                 )}
+                {/* UI improvement #8: show per-message running cost */}
                 {convUsage && (
                   <span className="text-xs text-zinc-600 ml-auto flex-shrink-0 whitespace-nowrap">
                     {formatCost(convUsage.estimatedCostUsd)}
@@ -822,7 +912,6 @@ export default function Home() {
             )}
 
             <div className="flex items-end gap-1.5">
-              {/* Compact attach button */}
               <LocalFileContext
                 compact
                 onFilesLoaded={(files) => setLocalFiles((prev) => [...prev, ...files])}
@@ -855,27 +944,42 @@ export default function Home() {
                 />
               </div>
 
-              <button
-                onClick={() => sendMessage()}
-                disabled={!input.trim() || loading}
-                className={`flex items-center justify-center rounded-xl w-[46px] h-[46px] flex-shrink-0 transition-all ${
-                  !input.trim() || loading
-                    ? "bg-zinc-800 text-zinc-600 cursor-not-allowed"
-                    : agentMode
-                    ? "bg-violet-700 hover:bg-violet-600 text-white"
-                    : "bg-teal-700 hover:bg-teal-600 text-white"
-                }`}
-                aria-label="Send"
-              >
-                <IconSend />
-              </button>
+              {/* Send / stop button */}
+              {isAgentBusy ? (
+                <button
+                  onClick={() => {
+                    // UI improvement: stop indicator (abort is non-trivial without streaming cancellation, shows intent)
+                    setAgentStatus("Stopping…");
+                  }}
+                  className="flex items-center justify-center rounded-xl w-[46px] h-[46px] flex-shrink-0 bg-zinc-700 hover:bg-red-800/70 text-zinc-400 hover:text-red-300 transition-all"
+                  aria-label="Stop agent"
+                  title="Stop agent"
+                >
+                  <IconStop />
+                </button>
+              ) : (
+                <button
+                  onClick={() => sendMessage()}
+                  disabled={!input.trim() || loading}
+                  className={`flex items-center justify-center rounded-xl w-[46px] h-[46px] flex-shrink-0 transition-all ${
+                    !input.trim() || loading
+                      ? "bg-zinc-800 text-zinc-600 cursor-not-allowed"
+                      : agentMode
+                      ? "bg-violet-700 hover:bg-violet-600 text-white"
+                      : "bg-teal-700 hover:bg-teal-600 text-white"
+                  }`}
+                  aria-label="Send"
+                >
+                  <IconSend />
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
 
       {/* ── GitHub sidebar ────────────────────────────────────────────────── */}
-      <div className={`sidebar-right ${showGitHub ? "open" : ""} md:static md:transform-none md:w-72 md:flex md:flex-col md:border-l md:border-zinc-800 md:bg-transparent`}>
+      <div className={`sidebar-right ${showGitHub ? "open" : ""} md:static md:transform-none md:visible md:w-72 md:flex md:flex-col md:border-l md:border-zinc-800 md:bg-transparent`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 flex-shrink-0">
           <span className="text-zinc-100 text-sm font-semibold">GitHub</span>
           <button onClick={() => setShowGitHub(false)} className="touch-target text-zinc-500 hover:text-zinc-200">
@@ -895,7 +999,7 @@ export default function Home() {
                   ? current.filter((f) => f !== filePath)
                   : [...current, filePath];
                 const next = { ...prev, [repo]: updated };
-                localStorage.setItem("codeagent:pinnedFiles", JSON.stringify(next));
+                lsSet("codeagent:pinnedFiles", JSON.stringify(next));
                 return next;
               });
             }}

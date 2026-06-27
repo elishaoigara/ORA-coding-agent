@@ -35,8 +35,9 @@ export function routeMessage(
   const wordCount = msg.split(/\s+/).length;
   const has = (signals: string[]) => signals.some((s) => msg.includes(s));
 
+  // Bug fix #5: was routing to deprecated deepseek-reasoner / deepseek-chat
   if (configuredProviders.includes("deepseek") && (has(REASON_SIGNALS) || wordCount > 80)) {
-    return { provider: "deepseek", model: "deepseek-reasoner", reason: "auto → DeepSeek R1 (reasoning)" };
+    return { provider: "deepseek", model: "deepseek-v4-pro", reason: "auto → DeepSeek V4 Pro (reasoning)" };
   }
 
   if (configuredProviders.includes("qwen") && has(CODE_SIGNALS)) {
@@ -48,7 +49,12 @@ export function routeMessage(
   }
 
   if (configuredProviders.includes("deepseek")) {
-    return { provider: "deepseek", model: "deepseek-chat", reason: "auto → DeepSeek V3 (default)" };
+    // Bug fix #5: was using deprecated deepseek-chat
+    return { provider: "deepseek", model: "deepseek-v4-flash", reason: "auto → DeepSeek V4 Flash (default)" };
+  }
+
+  if (configuredProviders.includes("openrouter")) {
+    return { provider: "openrouter", model: "deepseek/deepseek-v4-flash:free", reason: "auto → OpenRouter DeepSeek (free)" };
   }
 
   const fallback = configuredProviders[0] ?? "groq";
