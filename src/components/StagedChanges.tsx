@@ -8,6 +8,7 @@ interface Props {
   repo: string;
   onPush: (files: StagedFile[]) => void;
   onDiscard: () => void;
+  onOpenArtifact?: (lang: string, code: string, path?: string) => void;
 }
 
 // ── Myers diff algorithm ──────────────────────────────────────────────────────
@@ -135,10 +136,23 @@ function contextDiff(diff: DiffLine[], context = 3): DiffLine[] {
 }
 
 // ── FileDiff ──────────────────────────────────────────────────────────────────
-function FileDiff({ file, selected, onToggleSelect }: {
+const LANG_BY_EXT: Record<string, string> = {
+  ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx",
+  py: "python", json: "json", html: "html", css: "css", scss: "scss",
+  sh: "bash", yml: "yaml", yaml: "yaml", sql: "sql", md: "markdown",
+  go: "go", rs: "rust", java: "java", c: "c", cpp: "cpp",
+};
+
+function langFromPath(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  return LANG_BY_EXT[ext] ?? "text";
+}
+
+function FileDiff({ file, selected, onToggleSelect, onOpenArtifact }: {
   file: StagedFile;
   selected: boolean;
   onToggleSelect: () => void;
+  onOpenArtifact?: (lang: string, code: string, path?: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [view, setView] = useState<"diff" | "full">("diff");
@@ -191,6 +205,20 @@ function FileDiff({ file, selected, onToggleSelect }: {
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className="text-teal-400 text-xs">+{addedLines}</span>
           {removedLines > 0 && <span className="text-red-400 text-xs">-{removedLines}</span>}
+          {onOpenArtifact && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenArtifact(langFromPath(file.path), file.content, file.path);
+              }}
+              title="Open full file in split view"
+              className="flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-teal-300 hover:bg-zinc-700 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6v6M20 4L10 14" />
+              </svg>
+            </button>
+          )}
           <span className="text-zinc-600 text-xs select-none">{expanded ? "▲" : "▼"}</span>
         </div>
       </div>
@@ -260,7 +288,7 @@ function FileDiff({ file, selected, onToggleSelect }: {
 }
 
 // ── Main StagedChanges ────────────────────────────────────────────────────────
-export default function StagedChanges({ files, repo, onPush, onDiscard }: Props) {
+export default function StagedChanges({ files, repo, onPush, onDiscard, onOpenArtifact }: Props) {
   const [commitMsg, setCommitMsg] = useState("feat: AI agent changes");
   const [branch, setBranch]       = useState("");
   const [pushing, setPushing]     = useState(false);
@@ -363,6 +391,7 @@ export default function StagedChanges({ files, repo, onPush, onDiscard }: Props)
             file={f}
             selected={selectedPaths.has(f.path)}
             onToggleSelect={() => toggleFile(f.path)}
+            onOpenArtifact={onOpenArtifact}
           />
         ))}
       </div>

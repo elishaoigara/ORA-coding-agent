@@ -7,6 +7,7 @@ import ConversationList from "@/components/ConversationList";
 import StagedChanges from "@/components/StagedChanges";
 import PlanApproval from "@/components/PlanApproval";
 import LocalFileContext from "@/components/LocalFileContext";
+import ArtifactPanel, { type Artifact } from "@/components/ArtifactPanel";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
 import { buildTokenUsage, sumUsage, formatCost } from "@/lib/tokenCost";
@@ -108,6 +109,11 @@ export default function Home() {
   const [currentPlan, setCurrentPlan]     = useState<AgentPlan | null>(null);
   const [currentTask, setCurrentTask]     = useState("");
   const [stagedFiles, setStagedFiles]     = useState<StagedFile[]>([]);
+  const [artifact, setArtifact]           = useState<Artifact | null>(null);
+
+  const openArtifact = useCallback((lang: string, code: string, path?: string) => {
+    setArtifact({ id: `${Date.now()}`, path: path ?? "file", lang, content: code });
+  }, []);
 
   const [showHelp, setShowHelp]           = useState(false);
   const [localFiles, setLocalFiles]       = useState<InjectedFile[]>([]);
@@ -830,6 +836,7 @@ export default function Home() {
               message={msg}
               activeRepo={activeRepo}
               onSaveSnippet={saveSnippet}
+              onOpenArtifact={openArtifact}
             />
           ))}
 
@@ -852,6 +859,7 @@ export default function Home() {
           <StagedChanges
             files={stagedFiles}
             repo={activeRepo}
+            onOpenArtifact={openArtifact}
             onPush={(pushedFiles) => {
               // Bug fix #6: properly clear pushed files from staged state
               setStagedFiles((prev) => {
@@ -988,6 +996,13 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* ── Artifact panel (Claude-style split view for code files) ───────── */}
+      {artifact && (
+        <div className="artifact-panel">
+          <ArtifactPanel artifact={artifact} onClose={() => setArtifact(null)} />
+        </div>
+      )}
 
       {/* ── GitHub sidebar ────────────────────────────────────────────────── */}
       <div className={`sidebar-right ${showGitHub ? "open" : ""} md:static md:transform-none md:visible md:w-72 md:flex md:flex-col md:border-l md:border-zinc-800 md:bg-transparent`}>

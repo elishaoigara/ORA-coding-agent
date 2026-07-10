@@ -121,6 +121,27 @@ input, textarea, select {
   visibility: visible;
 }
 
+/* Artifact panel — full-screen overlay on mobile, static split pane on desktop */
+.artifact-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+@media (min-width: 768px) {
+  .artifact-panel {
+    position: static;
+    inset: auto;
+    z-index: auto;
+  }
+}
+@keyframes artifactSlideIn {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in {
+  animation: artifactSlideIn 0.2s ease-out;
+}
+
 /* Model pill selector */
 .model-pill {
   display: inline-flex;

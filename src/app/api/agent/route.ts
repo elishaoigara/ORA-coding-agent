@@ -212,6 +212,21 @@ function isQwenProvider(baseUrl: string): boolean {
   return baseUrl.includes("dashscope") || baseUrl.includes("aliyun");
 }
 
+// ── Leaked pseudo tool-call syntax detector ──────────────────────────────────
+// Some models (seen from certain OpenRouter free-tier models) don't use the
+// structured `tool_calls` field at all — instead they emit their own made-up
+// tag syntax for tool invocation directly as plain assistant `content`, e.g.
+// "<|DSML|tool_calls><|DSML|invoke name="read_file">...". Since the API call
+// succeeds (200 OK), our normal "no tool_calls" path treats this as regular
+// text and would stream the raw tags straight into the chat UI. Detect that
+// pattern here so we can nudge the model to use real function-calling instead
+// of showing the user a wall of garbled tags.
+const LEAKED_TOOLCALL_RE = /<\|?\s*[\w.-]*\|?\s*(?:tool_calls|invoke|function_calls?)\b/i;
+
+function looksLikeLeakedToolCall(text: string): boolean {
+  return LEAKED_TOOLCALL_RE.test(text);
+}
+
 function isQwenModel(model: string): boolean {
   return /^(qwen|qwq|qvq)/i.test(model);
 }
@@ -531,6 +546,25 @@ export async function POST(req: NextRequest) {
         if (!rawText) {
           consecutiveEmptyResponses++;
           if (consecutiveEmptyResponses >= 2) break;
+          continue;
+        }
+
+        // Model tried to call a tool using made-up tag syntax instead of the
+        // real function-calling API. Don't show this to the user — push it
+        // back as feedback and let the model retry with proper tool_calls.
+        if (looksLikeLeakedToolCall(rawText)) {
+          consecutiveEmptyResponses++;
+          if (consecutiveEmptyResponses >= 2) {
+            send("error", {
+              text: "⚠️ This model isn't reliably using tool calls. Try switching to a different model (e.g. DeepSeek V3.2 or Qwen3 Coder Plus).",
+            });
+            break;
+          }
+          messages.push({
+            role: "user",
+            content:
+              "Do not write tool calls as text/tags in your response content. Use the actual function-calling mechanism (the tool_calls field) to invoke tools. Try again.",
+          });
           continue;
         }
         consecutiveEmptyResponses = 0;

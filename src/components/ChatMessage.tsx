@@ -13,6 +13,25 @@ interface Props {
   message: Message;
   activeRepo?: string;
   onSaveSnippet?: (lang: string, code: string) => void;
+  onOpenArtifact?: (lang: string, code: string, path?: string) => void;
+}
+
+const EXT_BY_LANG: Record<string, string> = {
+  typescript: "ts", ts: "ts", tsx: "tsx", javascript: "js", js: "js", jsx: "jsx",
+  python: "py", py: "py", json: "json", html: "html", css: "css", bash: "sh",
+  sh: "sh", shell: "sh", yaml: "yml", yml: "yml", sql: "sql", markdown: "md",
+  md: "md", go: "go", rust: "rs", rs: "rs", java: "java", c: "c", cpp: "cpp",
+};
+
+// Tries to pull an explicit filename out of the code itself, e.g. a leading
+// "// path/to/File.tsx" or "# path/to/file.py" comment line — common when
+// models label files inline. Falls back to a generic name by language.
+function guessFilename(lang: string, code: string, index: number): string {
+  const firstLine = code.split("\n", 1)[0]?.trim() ?? "";
+  const commentMatch = firstLine.match(/^(?:\/\/|#|--)\s*([\w./-]+\.\w{1,10})\s*$/);
+  if (commentMatch) return commentMatch[1];
+  const ext = EXT_BY_LANG[lang.toLowerCase()] ?? "txt";
+  return `file_${index}.${ext}`;
 }
 
 const RUNNABLE_LANGS = new Set(["javascript", "js", "typescript", "ts"]);
@@ -213,11 +232,15 @@ function CodeBlock({
   code,
   activeRepo,
   onSaveSnippet,
+  onOpenArtifact,
+  fileIndex,
 }: {
   lang: string;
   code: string;
   activeRepo?: string;
   onSaveSnippet?: (lang: string, code: string) => void;
+  onOpenArtifact?: (lang: string, code: string, path?: string) => void;
+  fileIndex: number;
 }) {
   const { output, running, run, clear } = useCodeRunner();
   const [showPush, setShowPush] = useState(false);
@@ -226,6 +249,35 @@ function CodeBlock({
   const codeFiles = extractCodeFiles(code);
   const lineCount = code.split("\n").length;
   const isLongCode = lineCount > 30;
+  const filename = guessFilename(lang, code, fileIndex);
+
+  // ── Claude-style file card ────────────────────────────────────────────────
+  // For substantial code blocks, show a compact clickable card that opens the
+  // full file in the side panel instead of dumping it inline in the chat.
+  if (onOpenArtifact && lineCount > 6) {
+    return (
+      <div className="relative my-3">
+        <button
+          onClick={() => onOpenArtifact(lang, code, filename)}
+          className="w-full flex items-center gap-3 rounded-xl border border-zinc-700/60 bg-zinc-800/60 hover:bg-zinc-800 hover:border-zinc-600 px-4 py-3 text-left transition-colors group"
+        >
+          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-900 text-teal-400 flex-shrink-0">
+            <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 2v6h6" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-zinc-100 text-sm font-mono truncate">{filename}</div>
+            <div className="text-zinc-500 text-xs">{lineCount} lines · click to view</div>
+          </div>
+          <svg className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 flex-shrink-0 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="relative my-3 rounded-xl overflow-hidden border border-zinc-700/60 shadow-lg">
@@ -359,10 +411,11 @@ function InlineCode({ children }: { children: React.ReactNode }) {
 }
 
 // ── Main ChatMessage ──────────────────────────────────────────────────────────
-export default function ChatMessage({ message, activeRepo, onSaveSnippet }: Props) {
+export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpenArtifact }: Props) {
   const isUser   = message.role === "user";
   const isSystem = message.role === "system";
   const [hovered, setHovered] = useState(false);
+  let codeBlockIndex = 0;
 
   if (isSystem) {
     return (
@@ -412,12 +465,15 @@ export default function ChatMessage({ message, activeRepo, onSaveSnippet }: Prop
                         const match = /language-(\w+)/.exec(className || "");
                         const codeString = String(children).replace(/\n$/, "");
                         if (match) {
+                          codeBlockIndex += 1;
                           return (
                             <CodeBlock
                               lang={match[1]}
                               code={codeString}
                               activeRepo={activeRepo}
                               onSaveSnippet={onSaveSnippet}
+                              onOpenArtifact={onOpenArtifact}
+                              fileIndex={codeBlockIndex}
                             />
                           );
                         }
