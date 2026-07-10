@@ -1,4 +1,4 @@
-export type ProviderId = "auto" | "groq" | "deepseek" | "qwen" | "openai" | "anthropic" | "openrouter";
+export type ProviderId = "auto" | "groq" | "deepseek" | "qwen" | "openai" | "anthropic" | "openrouter" | "meta";
 
 export interface ProviderConfig {
   name: string;
@@ -183,6 +183,18 @@ const PROVIDERS: Record<Exclude<ProviderId, "auto">, ProviderConfig> = {
     models: [
       { id: "claude-sonnet-4-6",         label: "Claude Sonnet 4.6" },
       { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+    ],
+  },
+  meta: {
+    name: "Meta (Llama API)",
+    baseUrl: "https://api.llama.com/compat/v1",
+    apiKey: process.env.META_API_KEY ?? "",
+    defaultModel: "Llama-4-Maverick-17B-128E-Instruct-FP8",
+    models: [
+      { id: "Llama-4-Maverick-17B-128E-Instruct-FP8", label: "Llama 4 Maverick" },
+      { id: "Llama-4-Scout-17B-16E-Instruct-FP8",      label: "Llama 4 Scout" },
+      { id: "Llama-3.3-70B-Instruct",                  label: "Llama 3.3 70B" },
+      { id: "Llama-3.3-8B-Instruct",                   label: "Llama 3.3 8B" },
     ],
   },
 };
