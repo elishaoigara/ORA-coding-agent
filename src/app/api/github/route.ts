@@ -167,31 +167,40 @@ export async function POST(req: NextRequest) {
       const parentData = await parentRes.json();
       const baseTreeSha = parentData.tree.sha;
 
-      const treeItems = await Promise.all(
-        files.map(async ({ path, content }) => {
-          const blobRes = await fetch(`${GH_BASE}/repos/${repo}/git/blobs`, {
-            method: "POST",
-            headers: { ...ghHeaders(), "Content-Type": "application/json" },
-            body: JSON.stringify({ content, encoding: "utf-8" }),
-          });
-          const blob = await blobRes.json();
-          return { path, mode: "100644", type: "blob", sha: blob.sha };
-        })
-      );
+      // Create blobs sequentially to avoid GitHub rate limits on large pushes
+      const treeItems: { path: string; mode: string; type: string; sha: string }[] = [];
+      for (const { path, content } of files) {
+        const blobRes = await fetch(`${GH_BASE}/repos/${repo}/git/blobs`, {
+          method: "POST",
+          headers: { ...ghHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({ content, encoding: "utf-8" }),
+        });
+        if (!blobRes.ok) {
+          const errText = await blobRes.text();
+          throw new Error(`Failed to create blob for "${path}": ${errText}`);
+        }
+        const blob = await blobRes.json();
+        if (!blob.sha) throw new Error(`Blob SHA missing for "${path}": ${JSON.stringify(blob)}`);
+        treeItems.push({ path, mode: "100644", type: "blob", sha: blob.sha });
+      }
 
       const treeRes = await fetch(`${GH_BASE}/repos/${repo}/git/trees`, {
         method: "POST",
         headers: { ...ghHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ base_tree: baseTreeSha, tree: treeItems }),
       });
+      if (!treeRes.ok) throw new Error(`Failed to create tree: ${await treeRes.text()}`);
       const treeData = await treeRes.json();
+      if (!treeData.sha) throw new Error(`Tree SHA missing: ${JSON.stringify(treeData)}`);
 
       const commitRes = await fetch(`${GH_BASE}/repos/${repo}/git/commits`, {
         method: "POST",
         headers: { ...ghHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ message, tree: treeData.sha, parents: [parentSha] }),
       });
+      if (!commitRes.ok) throw new Error(`Failed to create commit: ${await commitRes.text()}`);
       const commitData = await commitRes.json();
+      if (!commitData.sha) throw new Error(`Commit SHA missing: ${JSON.stringify(commitData)}`);
 
       const updateRes = await fetch(
         `${GH_BASE}/repos/${repo}/git/refs/heads/${targetBranch}`,
