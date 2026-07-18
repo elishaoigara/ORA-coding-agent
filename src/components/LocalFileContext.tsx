@@ -64,7 +64,7 @@ async function extractZip(file: File): Promise<InjectedFile[]> {
     const name = parts[parts.length - 1];
     if (!isTextFile(name)) continue;
     if (data.byteLength > 500_000) continue;
-    try { results.push({ path: entryPath, content: strFromU8(data), repo: `local:${file.name}` }); }
+    try { results.push({ path: entryPath, content: strFromU8(data) }); }
     catch { /* binary file */ }
   }
   return results;
@@ -76,7 +76,7 @@ async function processFile(file: File): Promise<InjectedFile[]> {
   if (!isTextFile(file.name)) throw new Error(`"${file.name}" is not a supported file type.`);
   if (file.size > 500_000) throw new Error(`"${file.name}" is too large (max 500 KB).`);
   const content = await readAsText(file);
-  return [{ path: file.name, content, repo: "local" }];
+  return [{ path: file.name, content }];
 }
 
 export default function LocalFileContext({ onFilesLoaded, compact }: Props) {
