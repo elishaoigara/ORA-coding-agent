@@ -42,6 +42,9 @@ export default function GitHubSidebar({
   contextWindow,
 }: Props) {
   const [repo, setRepo]             = useState(savedContext?.repo ?? "");
+  const [repos, setRepos]           = useState<Array<{ name: string; full_name: string; private: boolean; description: string | null }>>([]);
+  const [reposLoading, setReposLoading] = useState(false);
+  const [repoSearch, setRepoSearch] = useState("");
   const [path, setPath]             = useState("");
   const [files, setFiles]           = useState<InjectedFile[]>(savedContext?.files ?? []);
   const [loading, setLoading]       = useState(false);
@@ -53,6 +56,19 @@ export default function GitHubSidebar({
     const totalChars = files.reduce((s, f) => s + f.content.length, 0);
     return Math.round(totalChars / 4);
   }
+
+  // ── Load repo list on mount ───────────────────────────────────────────
+  useEffect(() => {
+    setReposLoading(true);
+    fetch("/api/github?action=repos")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) setError(data.error);
+        else setRepos(data);
+      })
+      .catch(() => setError("Could not load repos. Check GITHUB_PAT."))
+      .finally(() => setReposLoading(false));
+  }, []);
 
   // ── Auto-load saved context ──────────────────────────────────────────
   useEffect(() => {
@@ -200,8 +216,8 @@ export default function GitHubSidebar({
 
   return (
     <div className="flex flex-col h-full bg-zinc-950">
-      {/* ── Repo input ────────────────────────────────────────────────── */}
-      <div className="px-4 py-3 border-b border-zinc-800">
+      {/* ── Repo picker ───────────────────────────────────────────────── */}
+      <div className="px-4 py-3 border-b border-zinc-800 space-y-2">
         <div className="flex items-center gap-2">
           <span className="text-teal-400 text-sm">⎇</span>
           <input
@@ -210,7 +226,64 @@ export default function GitHubSidebar({
             placeholder="owner/repo"
             className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 text-xs focus:outline-none focus:border-teal-600 placeholder:text-zinc-600"
           />
+          {repo && (
+            <button
+              onClick={() => { setRepo(""); setCurrentPath([]); setListing([]); }}
+              className="text-zinc-500 hover:text-zinc-300 text-xs px-2 py-2"
+              title="Change repo"
+            >
+              ✕
+            </button>
+          )}
         </div>
+
+        {/* Repo list / search, shown until a repo is chosen */}
+        {!repo && (
+          <div>
+            <input
+              value={repoSearch}
+              onChange={(e) => setRepoSearch(e.target.value)}
+              placeholder="Search your repos..."
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-300 text-xs placeholder:text-zinc-600 focus:outline-none focus:border-teal-600"
+            />
+            <div className="mt-2 max-h-56 overflow-y-auto space-y-0.5 mobile-scroll">
+              {reposLoading ? (
+                <div className="px-2 py-4 text-zinc-500 text-xs text-center">Loading repos...</div>
+              ) : (
+                (() => {
+                  const filtered = repoSearch
+                    ? repos.filter((r) =>
+                        r.full_name.toLowerCase().includes(repoSearch.toLowerCase()) ||
+                        (r.description && r.description.toLowerCase().includes(repoSearch.toLowerCase()))
+                      )
+                    : repos;
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="px-2 py-4 text-zinc-500 text-xs text-center">
+                        {repoSearch ? "No matching repos" : "No repos found"}
+                      </div>
+                    );
+                  }
+                  return filtered.map((r) => (
+                    <button
+                      key={r.full_name}
+                      onClick={() => setRepo(r.full_name)}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500 text-xs">{r.private ? "🔒" : "📂"}</span>
+                        <span className="text-zinc-200 text-xs font-medium truncate">{r.name}</span>
+                      </div>
+                      {r.description && (
+                        <p className="text-zinc-500 text-xs mt-0.5 truncate pl-5">{r.description}</p>
+                      )}
+                    </button>
+                  ));
+                })()
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Tabs ──────────────────────────────────────────────────────── */}

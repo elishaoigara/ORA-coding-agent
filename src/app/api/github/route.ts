@@ -10,6 +10,34 @@ function ghHeaders(pat: string) {
   };
 }
 
+export async function GET(req: NextRequest) {
+  const pat = process.env.GITHUB_PAT;
+  if (!pat) return NextResponse.json({ error: "GITHUB_PAT not set" }, { status: 500 });
+
+  const headers = ghHeaders(pat);
+  const action = req.nextUrl.searchParams.get("action");
+
+  if (action === "repos") {
+    try {
+      const res = await fetch(`${GH_BASE}/user/repos?per_page=100&sort=updated`, { headers });
+      if (!res.ok) return NextResponse.json({ error: `GitHub error: ${res.status}` });
+      const data = await res.json();
+      return NextResponse.json(
+        data.map((r: { name: string; full_name: string; private: boolean; description: string | null }) => ({
+          name: r.name,
+          full_name: r.full_name,
+          private: r.private,
+          description: r.description,
+        }))
+      );
+    } catch (e) {
+      return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+    }
+  }
+
+  return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
+}
+
 export async function POST(req: NextRequest) {
   const pat = process.env.GITHUB_PAT;
   if (!pat) return NextResponse.json({ error: "GITHUB_PAT not set" }, { status: 500 });
