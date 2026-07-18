@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProvider } from "@/lib/providers";
-import { AGENT_TOOLS, type StagedFile } from "@/lib/agentTools";
+import { getProvider, resolveModel } from "@/lib/providers";
+import { getAgentTools, type StagedFile } from "@/lib/agentTools";
 
 export const maxDuration = 300;
 
@@ -11,7 +11,6 @@ const MAX_TOKENS = 32000;
 const REQUEST_BUDGET_MS  = parseInt(process.env.AGENT_WATCHDOG_MS ?? "45000", 10);
 const PER_CALL_TIMEOUT_MS = Math.min(40_000, REQUEST_BUDGET_MS - 5_000);
 
-// ── Phase 1: Plan ─────────────────────────────────────────────────────────────
 const PLAN_SYSTEM_PROMPT = `You are a senior software engineer analyzing a codebase to plan changes.
 
 YOUR ONLY JOB IN THIS PHASE:
@@ -45,6 +44,12 @@ OUTPUT FORMAT — at the very end of your response, output your plan as JSON wra
       "path": "src/components/Navbar.tsx",
       "reason": "Needs to include the new LogoutButton",
       "details": "Import LogoutButton and add it to the nav items for authenticated users"
+    },
+    {
+      "action": "delete",
+      "path": "src/old/unused.ts",
+      "reason": "No longer needed after Navbar refactor",
+      "details": "Remove the unused utility file"
     }
   ]
 }
@@ -52,10 +57,9 @@ OUTPUT FORMAT — at the very end of your response, output your plan as JSON wra
 
 Write your analysis first in plain text, then end with the <PLAN> block.`;
 
-// ── Phase 2: Execute ──────────────────────────────────────────────────────────
 function buildExecutePrompt(plan: AgentPlan): string {
   const changesList = plan.changes
-    .map((c) => `- ${c.action.toUpperCase()} \`${c.path}\`: ${c.details}`)
+    .map((c) => `- ${c.action.toUpperCase()} ${c.path}: ${c.details}`)
     .join("\n");
 
   return `You are a coding agent executing an approved plan. The user has reviewed and approved the following plan. Execute it now.
@@ -70,15 +74,15 @@ ${changesList}
 EXECUTION RULES:
 - NEVER ask questions or say "I'll do X" — just DO it immediately with tool calls
 - NEVER truncate code — write COMPLETE file contents, every single line
-- NEVER use "..." or "// rest of file" placeholders — the full file must be written
+- NEVER use placeholder patterns like the word-dot-dot-dot or slash-star-dot-dot-dot-star-slash — write the full file
 - For every file marked "modify": call read_file first, then stage_file with complete updated content
 - For every file marked "create": call stage_file with complete new file content
+- For every file marked "delete": call delete_file with the file path and reason
 - Write FULL file content — if a file is 500 lines, write all 500 lines
 - Follow the existing code style exactly
 - After ALL files are staged with stage_file, stop calling tools and write a SHORT plain-text summary of every file you changed`;
 }
 
-// ── Tool helpers ──────────────────────────────────────────────────────────────
 function ghHeaders(pat: string) {
   return {
     Authorization: `Bearer ${pat}`,
@@ -86,6 +90,8 @@ function ghHeaders(pat: string) {
     "X-GitHub-Api-Version": "2022-11-28",
   };
 }
+
+const ELLIPSIS = "\u2026";
 
 async function executeTool(
   name: string,
@@ -141,22 +147,25 @@ async function executeTool(
 
     if (name === "stage_file") {
       let originalContent: string | null = null;
+      let fileSha: string | undefined;
       const existing = await fetch(`${GH_BASE}/repos/${repo}/contents/${args.path}`, { headers });
       if (existing.ok) {
         const data = await existing.json();
-        if (data.content) originalContent = Buffer.from(data.content, "base64").toString("utf-8");
+        if (data.content) {
+          originalContent = Buffer.from(data.content, "base64").toString("utf-8");
+          fileSha = data.sha;
+        }
       }
 
       const content = args.content ?? "";
+      const truncatedIndicator = "..." as const;
       if (
-        content.trim().endsWith("...") ||
-        content.includes("// ... rest") ||
-        content.includes("// ...rest") ||
-        content.includes("/* ... */") ||
-        content.includes("# ... rest")
+        content.trim().endsWith(truncatedIndicator) ||
+        content.includes("// " + truncatedIndicator + " rest") ||
+        content.includes("/* " + truncatedIndicator + " */")
       ) {
         return JSON.stringify({
-          error: "TRUNCATED CONTENT DETECTED. You must write the COMPLETE file. Never use '...' placeholders.",
+          error: "TRUNCATED CONTENT DETECTED. You must write the COMPLETE file. Never use placeholder patterns.",
         });
       }
 
@@ -165,6 +174,8 @@ async function executeTool(
         content,
         originalContent,
         description: args.description,
+        action: originalContent !== null ? "modify" : "create",
+        sha: fileSha,
       };
 
       const idx = stagedFiles.findIndex((f) => f.path === args.path);
@@ -176,6 +187,36 @@ async function executeTool(
         path: args.path,
         status: originalContent !== null ? "modified" : "new file",
         lines: content.split("\n").length,
+      });
+    }
+
+    if (name === "delete_file") {
+      const existing = await fetch(`${GH_BASE}/repos/${repo}/contents/${args.path}`, { headers });
+      if (!existing.ok) {
+        return JSON.stringify({ error: `File not found: ${args.path}. Cannot delete.` });
+      }
+      const data = await existing.json();
+      const sha: string = data.sha;
+      const originalContent = data.content ? Buffer.from(data.content, "base64").toString("utf-8") : null;
+
+      const staged: StagedFile = {
+        path: args.path,
+        content: null,
+        originalContent,
+        description: args.reason ?? `Delete ${args.path}`,
+        action: "delete",
+        sha,
+      };
+
+      const idx = stagedFiles.findIndex((f) => f.path === args.path);
+      if (idx >= 0) stagedFiles[idx] = staged;
+      else stagedFiles.push(staged);
+
+      return JSON.stringify({
+        success: true,
+        path: args.path,
+        status: "deleted",
+        sha,
       });
     }
 
@@ -196,7 +237,6 @@ async function streamText(
   }
 }
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 export interface AgentPlan {
   summary: string;
   approach: string;
@@ -212,15 +252,6 @@ function isQwenProvider(baseUrl: string): boolean {
   return baseUrl.includes("dashscope") || baseUrl.includes("aliyun");
 }
 
-// ── Leaked pseudo tool-call syntax detector ──────────────────────────────────
-// Some models (seen from certain OpenRouter free-tier models) don't use the
-// structured `tool_calls` field at all — instead they emit their own made-up
-// tag syntax for tool invocation directly as plain assistant `content`, e.g.
-// "<|DSML|tool_calls><|DSML|invoke name="read_file">...". Since the API call
-// succeeds (200 OK), our normal "no tool_calls" path treats this as regular
-// text and would stream the raw tags straight into the chat UI. Detect that
-// pattern here so we can nudge the model to use real function-calling instead
-// of showing the user a wall of garbled tags.
 const LEAKED_TOOLCALL_RE = /<\|?\s*[\w.-]*\|?\s*(?:tool_calls|invoke|function_calls?)\b/i;
 
 function looksLikeLeakedToolCall(text: string): boolean {
@@ -246,12 +277,9 @@ function llmHeaders(apiKey: string, baseUrl: string): Record<string, string> {
   return headers;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildRequestBody(params: {
   model: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   messages: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tools: any[];
   baseUrl: string;
   forceText?: boolean;
@@ -304,23 +332,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }
 
-  const agentModel =
-    model === "deepseek-reasoner" ? "deepseek-chat" : model || provider.defaultModel;
-
-  const planTools = AGENT_TOOLS.filter((t) =>
-    ["read_file", "list_files", "search_files"].includes(
-      (t as { function: { name: string } }).function.name
-    )
-  );
+  const agentModel = resolveModel(model || provider.defaultModel);
+  const activeTools = getAgentTools(phase);
 
   const stagedFiles: StagedFile[] = resumeStagedFiles ? [...resumeStagedFiles] : [];
   const encoder = new TextEncoder();
 
   function allFilesStaged(): boolean {
     if (!plan) return false;
-    return plan.changes
-      .filter((c) => c.action !== "delete")
-      .every((c) => stagedFiles.some((f) => f.path === c.path));
+    return plan.changes.every((c) => stagedFiles.some((f) => f.path === c.path));
   }
 
   const stream = new ReadableStream({
@@ -331,14 +351,11 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const isResume = !!resumeMessages?.length;
-      const phaseLabel = isResume ? "Continuing execution" : phase === "plan" ? "Analysing codebase" : "Executing plan";
-      send("progress", { text: `${phaseLabel} on **${repo}** using ${provider.name} / ${agentModel}…` });
+      const phaseLabel = phase === "plan" ? "Analysing codebase" : "Executing plan";
+      send("progress", { text: `${phaseLabel} on ${repo} using ${provider.name} / ${agentModel}${ELLIPSIS}` });
 
       const systemPrompt = phase === "plan" ? PLAN_SYSTEM_PROMPT : buildExecutePrompt(plan!);
-      const activeTools  = phase === "plan" ? planTools : AGENT_TOOLS;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const messages: any[] = resumeMessages?.length
         ? [...resumeMessages]
         : [{ role: "user", content: task }];
@@ -355,7 +372,7 @@ export async function POST(req: NextRequest) {
       while (iterations < MAX_ITERATIONS_PER_CALL) {
         if (nearBudget()) {
           const missing = plan?.changes
-            .filter((c) => c.action !== "delete" && !stagedFiles.some((f) => f.path === c.path))
+            .filter((c) => !stagedFiles.some((f) => f.path === c.path))
             .map((c) => `- ${c.path}`).join("\n");
           if (phase === "execute" && missing) {
             const prunedWatchdog = messages.map((m: Record<string, unknown>) => {
@@ -363,14 +380,14 @@ export async function POST(req: NextRequest) {
               try {
                 const p = JSON.parse(m.content as string ?? "{}");
                 if (typeof p.content === "string" && p.content.length > 500)
-                  return { ...m, content: JSON.stringify({ ...p, content: `[pruned]` }) };
+                  return { ...m, content: JSON.stringify({ ...p, content: "[pruned]" }) };
               } catch { /**/ }
               return m;
             });
             send("continue", {
               messages: prunedWatchdog,
               stagedFiles,
-              progress: `Staged ${stagedFiles.length} file(s). Resuming in next request…`,
+              progress: `Staged ${stagedFiles.length} file(s). Resuming in next request${ELLIPSIS}`,
             });
             controller.close();
             return;
@@ -384,7 +401,7 @@ export async function POST(req: NextRequest) {
         try {
           const forceText = phase === "execute" && allFilesStaged();
 
-          const fetchAbort   = new AbortController();
+          const fetchAbort = new AbortController();
           const fetchTimeout = setTimeout(() => fetchAbort.abort(), PER_CALL_TIMEOUT_MS);
 
           let res!: Response;
@@ -409,28 +426,16 @@ export async function POST(req: NextRequest) {
 
           if (!res.ok) {
             const errText = await res.text();
-
-            // ── Groq/LLaMA XML tool-call fallback ──────────────────────────
-            // LLaMA models on Groq emit tool calls in XML instead of JSON.
-            // Two known variants:
-            //   Format 1: <function=name>{"args"}</function>
-            //   Format 2: <function=name\n{"args"}></c/function>  ← LLaMA 3.3 70B
-            // Groq rejects both with 400 tool_use_failed. Parse and execute
-            // them ourselves so the agent loop continues uninterrupted.
             try {
               const errJson = JSON.parse(errText);
               if (errJson.error?.code === "tool_use_failed") {
                 const failedGen: string = errJson.error?.failed_generation ?? "";
-
-                const xmlRe  = /<function=(\w+)>([\s\S]*?)<\/function>/g;
+                const xmlRe = /<function=(\w+)>([\s\S]*?)<\/function>/g;
                 const xmlRe2 = /<function=(\w+)\n({[\s\S]*?})>(?:<\/c\/function>|<\/function>)/g;
-
                 let xmlMatch: RegExpExecArray | null;
                 let recovered = false;
                 const syntheticToolCalls: {id: string; type: string; function: {name: string; arguments: string}}[] = [];
                 const toolResults: {id: string; content: string}[] = [];
-
-                // Collect all matches from both format variants
                 const allMatches: [string, string][] = [];
                 while ((xmlMatch = xmlRe.exec(failedGen)) !== null) {
                   allMatches.push([xmlMatch[1], xmlMatch[2].trim()]);
@@ -438,14 +443,11 @@ export async function POST(req: NextRequest) {
                 while ((xmlMatch = xmlRe2.exec(failedGen)) !== null) {
                   allMatches.push([xmlMatch[1], xmlMatch[2].trim()]);
                 }
-
                 for (const [toolName, rawArgs] of allMatches) {
                   let args: Record<string, string> = {};
-                  try { args = JSON.parse(rawArgs || "{}"); } catch { /* no args */ }
-
+                  try { args = JSON.parse(rawArgs || "{}"); } catch { /* */ }
                   const syntheticId = `xmlcall_${Date.now()}_${syntheticToolCalls.length}`;
-                  send("tool_call", { text: `↩ Retrying \`${toolName}\` (XML→JSON fix)…` });
-
+                  send("tool_call", { text: `Retrying ${toolName}${ELLIPSIS}` });
                   const result = await executeTool(toolName, args, repo, stagedFiles);
                   syntheticToolCalls.push({
                     id: syntheticId, type: "function",
@@ -454,7 +456,6 @@ export async function POST(req: NextRequest) {
                   toolResults.push({ id: syntheticId, content: result });
                   recovered = true;
                 }
-
                 if (recovered) {
                   messages.push({ role: "assistant", content: null, tool_calls: syntheticToolCalls });
                   for (const tr of toolResults) {
@@ -463,9 +464,7 @@ export async function POST(req: NextRequest) {
                   continue;
                 }
               }
-            } catch { /* not JSON or no failed_generation — fall through */ }
-            // ── End Groq XML fallback ───────────────────────────────────────
-
+            } catch { /* */ }
             send("error", { text: `LLM error (${res.status}): ${errText.slice(0, 500)}` });
             break;
           }
@@ -486,12 +485,12 @@ export async function POST(req: NextRequest) {
               send("continue", {
                 messages: prunedAbort,
                 stagedFiles,
-                progress: `LLM call timed out — staged ${stagedFiles.length} file(s) so far. Resuming…`,
+                progress: `LLM call timed out - staged ${stagedFiles.length} file(s). Resuming${ELLIPSIS}`,
               });
               controller.close();
               return;
             }
-            send("error", { text: "⏱ The LLM took too long to respond. Try a faster model or a smaller task." });
+            send("error", { text: "LLM took too long. Try a faster model or smaller task." });
             break;
           }
           send("error", { text: `Network error: ${err.message}` });
@@ -500,7 +499,7 @@ export async function POST(req: NextRequest) {
 
         const choice = llmResponse.choices?.[0];
         if (!choice) {
-          send("error", { text: `Empty response from LLM. Raw: ${JSON.stringify(llmResponse).slice(0, 200)}` });
+          send("error", { text: "Empty response from LLM." });
           break;
         }
 
@@ -508,10 +507,10 @@ export async function POST(req: NextRequest) {
         messages.push(assistantMsg);
 
         if (choice.finish_reason === "length") {
-          send("progress", { text: "⚠️ Response was cut off — continuing…" });
+          send("progress", { text: `Response cut off - continuing${ELLIPSIS}` });
           messages.push({
             role: "user",
-            content: "Your last response was cut off. Continue exactly where you left off — complete all remaining tool calls and file changes.",
+            content: "Your last response was cut off. Continue exactly where you left off.",
           });
           continue;
         }
@@ -524,15 +523,16 @@ export async function POST(req: NextRequest) {
             const toolName = toolCall.function?.name ?? "unknown";
             const toolId = toolCall.id ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
             let args: Record<string, string> = {};
-            try { args = JSON.parse(toolCall.function?.arguments ?? "{}"); } catch { /* empty */ }
+            try { args = JSON.parse(toolCall.function?.arguments ?? "{}"); } catch { /* */ }
 
             const labels: Record<string, string> = {
-              read_file:    `Reading \`${args.path}\`…`,
-              list_files:   `Exploring \`${args.path || "/"}\`…`,
-              search_files: `Searching for \`${args.pattern}\`…`,
-              stage_file:   `Staging \`${args.path}\`…`,
+              read_file:    `Reading ${args.path}${ELLIPSIS}`,
+              list_files:   `Exploring ${args.path || "/"}${ELLIPSIS}`,
+              search_files: `Searching for ${args.pattern}${ELLIPSIS}`,
+              stage_file:   `Staging ${args.path}${ELLIPSIS}`,
+              delete_file:  `Deleting ${args.path}${ELLIPSIS}`,
             };
-            send("tool_call", { text: labels[toolName] ?? `Calling ${toolName}…` });
+            send("tool_call", { text: labels[toolName] ?? `Calling ${toolName}${ELLIPSIS}` });
 
             const result = await executeTool(toolName, args, repo, stagedFiles);
             toolCall.id = toolId;
@@ -549,21 +549,15 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        // Model tried to call a tool using made-up tag syntax instead of the
-        // real function-calling API. Don't show this to the user — push it
-        // back as feedback and let the model retry with proper tool_calls.
         if (looksLikeLeakedToolCall(rawText)) {
           consecutiveEmptyResponses++;
           if (consecutiveEmptyResponses >= 2) {
-            send("error", {
-              text: "⚠️ This model isn't reliably using tool calls. Try switching to a different model (e.g. DeepSeek V3.2 or Qwen3 Coder Plus).",
-            });
+            send("error", { text: "Model not reliably using tool calls. Try a different model." });
             break;
           }
           messages.push({
             role: "user",
-            content:
-              "Do not write tool calls as text/tags in your response content. Use the actual function-calling mechanism (the tool_calls field) to invoke tools. Try again.",
+            content: "Do not write tool calls as text. Use the tool_calls field. Try again.",
           });
           continue;
         }
@@ -583,38 +577,37 @@ export async function POST(req: NextRequest) {
               const parsedPlan: AgentPlan = JSON.parse(planMatch[1].trim());
               send("plan", { plan: parsedPlan });
             } catch {
-              send("plan_error", { text: "Could not parse structured plan. See analysis above." });
+              send("plan_error", { text: "Could not parse structured plan." });
             }
           } else {
             messages.push({
               role: "user",
-              content: "You forgot to include the <PLAN> JSON block. Please output ONLY the <PLAN>...</PLAN> block now, nothing else.",
+              content: "You forgot to include the <PLAN> block. Output ONLY the <PLAN> block now.",
             });
             continue;
           }
         } else {
           const missingPaths = plan?.changes
-            .filter((c) => c.action !== "delete" && !stagedFiles.some((f) => f.path === c.path))
+            .filter((c) => !stagedFiles.some((f) => f.path === c.path))
             .map((c) => `- ${c.path}`)
             .join("\n");
 
           if (missingPaths && iterations < MAX_ITERATIONS_PER_CALL) {
-            send("progress", { text: "Still staging remaining files…" });
+            send("progress", { text: "Still staging remaining files..." });
             messages.push({
               role: "user",
-              content: `You haven't staged all planned files yet. Still missing:\n${missingPaths}\n\nContinue — stage these files now.`,
+              content: `Still missing:\n${missingPaths}\n\nStage these files now.`,
             });
             continue;
           }
 
           if (missingPaths) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const prunedMsgs = messages.map((m: any) => {
               if (m.role !== "tool") return m;
               try {
                 const p = JSON.parse(m.content ?? "{}");
                 if (typeof p.content === "string" && p.content.length > 500) {
-                  return { ...m, content: JSON.stringify({ ...p, content: `[pruned — ${p.lines ?? "?"} lines]` }) };
+                  return { ...m, content: JSON.stringify({ ...p, content: `[pruned - ${p.lines ?? "?"} lines]` }) };
                 }
               } catch { /**/ }
               return m;
@@ -622,7 +615,7 @@ export async function POST(req: NextRequest) {
             send("continue", {
               messages: prunedMsgs,
               stagedFiles,
-              progress: `Staged ${stagedFiles.length} file(s) so far. Continuing…`,
+              progress: `Staged ${stagedFiles.length} file(s). Continuing...`,
             });
             controller.close();
             return;
@@ -638,27 +631,26 @@ export async function POST(req: NextRequest) {
       }
 
       const missingAfterLoop = plan?.changes
-        .filter((c) => c.action !== "delete" && !stagedFiles.some((f) => f.path === c.path))
+        .filter((c) => !stagedFiles.some((f) => f.path === c.path))
         .map((c) => `- ${c.path}`)
         .join("\n");
 
       if (phase === "execute" && missingAfterLoop) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const prunedMessages = messages.map((m: any) => {
           if (m.role !== "tool") return m;
           try {
             const parsed = JSON.parse(m.content ?? "{}");
             if (typeof parsed.content === "string" && parsed.content.length > 500) {
-              return { ...m, content: JSON.stringify({ ...parsed, content: `[pruned — ${parsed.lines ?? "?"} lines]` }) };
+              return { ...m, content: JSON.stringify({ ...parsed, content: `[pruned - ${parsed.lines ?? "?"} lines]` }) };
             }
-          } catch { /* not JSON */ }
+          } catch { /* */ }
           return m;
         });
 
         send("continue", {
           messages: prunedMessages,
           stagedFiles,
-          progress: `Staged ${stagedFiles.length} file(s) so far. Continuing in next batch…`,
+          progress: `Staged ${stagedFiles.length} file(s). Continuing in next batch${ELLIPSIS}`,
         });
         controller.close();
         return;
@@ -667,26 +659,17 @@ export async function POST(req: NextRequest) {
       if (!textWasSent) {
         if (phase === "execute" && stagedFiles.length > 0) {
           const summary = [
-            "Execution complete. Files staged:\n",
+            "Execution complete. Files staged:",
             ...stagedFiles.map(
-              (f) => `- \`${f.path}\` (${f.originalContent === null ? "new" : "modified"}): ${f.description}`
+              (f) => `- ${f.path} (${f.action === "delete" ? "deleted" : f.originalContent === null ? "new" : "modified"}): ${f.description}`
             ),
-            "\nReview the diffs below and push when ready.",
+            "Review diffs below and push when ready.",
           ].join("\n");
           await streamText(summary, send);
         } else if (phase === "execute" && stagedFiles.length === 0) {
-          await streamText(
-            "⚠️ The agent finished but staged no files. " +
-            "This usually means the model didn't use its tools. " +
-            "Try switching to Qwen3 Max or DeepSeek V3 and re-running the task.",
-            send
-          );
-        } else if (phase === "plan") {
-          await streamText(
-            "⚠️ The agent completed analysis but could not produce a structured plan. " +
-            "Please try rephrasing your task, or switch to a more capable model (DeepSeek V3.2 or Qwen3 Coder Plus).",
-            send
-          );
+          await streamText("Agent finished but staged no files. Try a different model.", send);
+        } else {
+          await streamText("Could not produce a structured plan. Try rephrasing.", send);
         }
       }
 

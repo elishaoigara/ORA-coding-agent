@@ -10,6 +10,9 @@ interface Props {
   executing: boolean;
 }
 
+// Note: DELETE action requires the delete_file tool to be defined in agentTools.ts
+// and the push_many handler in github/route.ts to handle null content entries.
+// Both are now implemented - see agentTools.ts executeTool delete_file handler.
 const ACTION_STYLES = {
   create: { label: "CREATE", bg: "bg-teal-900", text: "text-teal-300", border: "border-teal-700" },
   modify: { label: "MODIFY", bg: "bg-amber-900", text: "text-amber-300", border: "border-amber-700" },

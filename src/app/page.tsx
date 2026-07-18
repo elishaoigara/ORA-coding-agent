@@ -11,6 +11,7 @@ import ArtifactPanel, { type Artifact } from "@/components/ArtifactPanel";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
 import { buildTokenUsage, sumUsage, formatCost } from "@/lib/tokenCost";
+import { resolveModel } from "@/lib/providers";
 import type { Message, InjectedFile, PublicProvider, GitHubContext } from "@/types";
 import type { StagedFile } from "@/lib/agentTools";
 import type { AgentPlan } from "@/app/api/agent/route";
@@ -234,7 +235,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json", "x-app-password": password },
         body: JSON.stringify({
           messages: messagesWithSys,
-          model: selectedModel,
+          model: resolveModel(selectedModel),
           provider: selectedProviderId,
           injectedFiles,
         }),
@@ -414,7 +415,7 @@ export default function Home() {
         phase:             params.phase,
         plan:              params.plan,
         provider:          isAuto ? "qwen" : selectedProviderId,
-        model:             isAuto ? "qwen3-coder-plus" : selectedModel === "deepseek-reasoner" ? "deepseek-v4-flash" : selectedModel,
+        model:             isAuto ? "qwen3-coder-plus" : resolveModel(selectedModel),
         resumeMessages:    params.resumeMessages,
         resumeStagedFiles: params.resumeStagedFiles,
       }),
@@ -859,6 +860,7 @@ export default function Home() {
           <StagedChanges
             files={stagedFiles}
             repo={activeRepo}
+            defaultBranch={agentBranch}
             onOpenArtifact={openArtifact}
             onPush={(pushedFiles) => {
               // Bug fix #6: properly clear pushed files from staged state

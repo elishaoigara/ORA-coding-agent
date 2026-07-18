@@ -1,10 +1,3 @@
-/**
- * Token pricing and cost estimation for all ORA providers.
- *
- * Pricing is in USD per 1M tokens (same unit as the Claude Code source uses).
- * Update the tables below whenever providers change their pricing.
- */
-
 export interface TokenUsage {
   promptTokens: number;
   completionTokens: number;
@@ -12,139 +5,110 @@ export interface TokenUsage {
   estimatedCostUsd: number;
 }
 
-interface ModelPricing {
-  inputPer1M: number;   // $ per 1M input tokens
-  outputPer1M: number;  // $ per 1M output tokens
+// ── Per-model pricing (per 1M tokens) ─────────────────────────────────────────
+// Pricing sources:
+//   Groq:     https://console.groq.com/docs/pricing (2025-04)
+//   DeepSeek: https://api-docs.deepseek.com/quick_start/pricing
+//   Qwen:     https://help.aliyun.com/zh/model-studio/getting-started/models (2025-04)
+//   OpenAI:   https://openai.com/api/pricing/ (2025-04)
+//   OpenRouter: varies by model; uses middle-band pricing
+
+type PricingEntry = {
+  input: number;   // $ per 1M input tokens
+  output: number;  // $ per 1M output tokens
+};
+
+const PROVIDER_PRICING: Record<string, Record<string, PricingEntry>> = {
+  groq: {
+    "qwen-2.5-coder-32b":           { input: 0.79, output: 0.79 },
+    "deepseek-r1-distill-llama-70b": { input: 0.75, output: 0.99 },
+    "llama-3.3-70b-versatile":       { input: 0.59, output: 0.79 },
+  },
+  deepseek: {
+    "deepseek-chat":  { input: 0.27, output: 1.10 },
+    "deepseek-reasoner": { input: 0.14, output: 0.28 },
+  },
+  qwen: {
+    "qwen3-coder-plus": { input: 3.50, output: 7.00 },
+    "qwen3-coder-32b":  { input: 2.00, output: 6.00 },
+    "qwen3-max":        { input: 4.00, output: 12.00 },
+    "qwq-32b":          { input: 2.00, output: 6.00 },
+  },
+  openai: {
+    "gpt-4o":       { input: 2.50, output: 10.00 },
+    "gpt-4o-mini":  { input: 0.15, output: 0.60 },
+    "o3-mini":      { input: 1.10, output: 4.40 },
+    "gpt-4.1":      { input: 2.00, output: 8.00 },
+  },
+  openrouter: {
+    "deepseek/deepseek-chat:free":      { input: 0, output: 0 },
+    "deepseek/deepseek-r1:free":        { input: 0, output: 0 },
+    "qwen/qwen3-coder-plus:free":       { input: 0, output: 0 },
+    "qwen/qwen3-max:free":              { input: 0, output: 0 },
+    "google/gemini-2.0-flash-001:free": { input: 0, output: 0 },
+  },
+};
+
+const FALLBACK_PRICING: PricingEntry = { input: 2.00, output: 8.00 };
+
+function getProviderName(model: string): string | null {
+  for (const [provider, models] of Object.entries(PROVIDER_PRICING)) {
+    if (models[model]) return provider;
+  }
+  return null;
 }
 
-// ── Pricing tables ────────────────────────────────────────────────────────────
-// Sources: provider pricing pages as of May 2026.
-
-const GROQ_PRICING: Record<string, ModelPricing> = {
-  "llama-3.3-70b-versatile":    { inputPer1M: 0.59,  outputPer1M: 0.79 },
-  "llama-3.1-8b-instant":       { inputPer1M: 0.05,  outputPer1M: 0.08 },
-  "moonshotai/kimi-k2-instruct":{ inputPer1M: 1.00,  outputPer1M: 3.00 },
-  "mixtral-8x7b-32768":         { inputPer1M: 0.24,  outputPer1M: 0.24 },
-};
-
-const DEEPSEEK_PRICING: Record<string, ModelPricing> = {
-  "deepseek-chat":     { inputPer1M: 0.27, outputPer1M: 1.10 },
-  "deepseek-reasoner": { inputPer1M: 0.55, outputPer1M: 2.19 },
-};
-
-const OPENAI_PRICING: Record<string, ModelPricing> = {
-  "gpt-4o":                { inputPer1M: 2.50,  outputPer1M: 10.00 },
-  "gpt-4o-mini":           { inputPer1M: 0.15,  outputPer1M: 0.60  },
-  "o1":                    { inputPer1M: 15.00, outputPer1M: 60.00 },
-  "o1-mini":               { inputPer1M: 3.00,  outputPer1M: 12.00 },
-  "o3-mini":               { inputPer1M: 1.10,  outputPer1M: 4.40  },
-  "gpt-4-turbo":           { inputPer1M: 10.00, outputPer1M: 30.00 },
-};
-
-const ANTHROPIC_PRICING: Record<string, ModelPricing> = {
-  "claude-opus-4-6":         { inputPer1M: 15.00, outputPer1M: 75.00 },
-  "claude-sonnet-4-6":       { inputPer1M: 3.00,  outputPer1M: 15.00 },
-  "claude-haiku-4-5-20251001":{ inputPer1M: 1.00,  outputPer1M: 5.00  },
-  "claude-3-5-sonnet-20241022":{ inputPer1M: 3.00, outputPer1M: 15.00 },
-  "claude-3-5-haiku-20241022": { inputPer1M: 0.80, outputPer1M: 4.00  },
-};
-
-const QWEN_PRICING: Record<string, ModelPricing> = {
-  "qwen3-coder-plus":   { inputPer1M: 3.50,  outputPer1M: 14.00 },
-  "qwen3-coder-flash":  { inputPer1M: 0.50,  outputPer1M: 2.00  },
-  "qwen3-max":          { inputPer1M: 4.00,  outputPer1M: 16.00 },
-  "deepseek-v3.2":      { inputPer1M: 0.27,  outputPer1M: 1.10  },
-  "deepseek-v4-pro":    { inputPer1M: 0.50,  outputPer1M: 2.00  },
-};
-
-const PROVIDER_PRICING: Record<string, Record<string, ModelPricing>> = {
-  groq:      GROQ_PRICING,
-  deepseek:  DEEPSEEK_PRICING,
-  openai:    OPENAI_PRICING,
-  anthropic: ANTHROPIC_PRICING,
-  qwen:      QWEN_PRICING,
-};
-
-// Fallback pricing when model isn't in the table (e.g. a new model you added)
-const FALLBACK_PRICING: Record<string, ModelPricing> = {
-  groq:      { inputPer1M: 0.20,  outputPer1M: 0.40  },
-  deepseek:  { inputPer1M: 0.27,  outputPer1M: 1.10  },
-  openai:    { inputPer1M: 2.50,  outputPer1M: 10.00 },
-  anthropic: { inputPer1M: 3.00,  outputPer1M: 15.00 },
-  qwen:      { inputPer1M: 1.00,  outputPer1M: 4.00  },
-};
-
-// ── Public API ────────────────────────────────────────────────────────────────
-
-export function getPricing(providerId: string, modelId: string): ModelPricing {
-  const table = PROVIDER_PRICING[providerId] ?? {};
-
-  // Exact match first
-  if (table[modelId]) return table[modelId];
-
-  // Prefix match (handles dated variants like "qwen3-coder-plus-2025-09-23")
-  const prefix = Object.keys(table).find((k) => modelId.startsWith(k));
-  if (prefix) return table[prefix];
-
-  return FALLBACK_PRICING[providerId] ?? { inputPer1M: 1.00, outputPer1M: 3.00 };
-}
-
-export function calcCostUsd(
-  promptTokens: number,
-  completionTokens: number,
-  providerId: string,
-  modelId: string,
-): number {
-  const pricing = getPricing(providerId, modelId);
-  return (
-    (promptTokens    / 1_000_000) * pricing.inputPer1M +
-    (completionTokens / 1_000_000) * pricing.outputPer1M
-  );
-}
-
+// ── Helpers ───────────────────────────────────────────────────────────────────
 export function buildTokenUsage(
-  rawUsage: { prompt_tokens?: number; completion_tokens?: number } | null | undefined,
+  llmResponse: { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } },
   providerId: string,
-  modelId: string,
-): TokenUsage | null {
-  if (!rawUsage) return null;
-  const promptTokens     = rawUsage.prompt_tokens ?? 0;
-  const completionTokens = rawUsage.completion_tokens ?? 0;
+  model: string
+): TokenUsage {
+  const usage = llmResponse.usage ?? {};
+  const promptTokens = usage.prompt_tokens ?? 0;
+  const completionTokens = usage.completion_tokens ?? 0;
+  const totalTokens = usage.total_tokens ?? (promptTokens + completionTokens);
+
+  let pricing: PricingEntry = FALLBACK_PRICING;
+
+  // Try exact model match first
+  const providerModels = PROVIDER_PRICING[providerId];
+  if (providerModels?.[model]) {
+    pricing = providerModels[model];
+  } else {
+    // Try auto-detecting provider from model name
+    const detectedProvider = getProviderName(model);
+    if (detectedProvider) {
+      const pm = PROVIDER_PRICING[detectedProvider];
+      if (pm?.[model]) pricing = pm[model];
+    }
+    // Fallback: try matching model prefix
+    for (const [, models] of Object.entries(PROVIDER_PRICING)) {
+      const match = Object.entries(models).find(([key]) => model.includes(key) || key.includes(model));
+      if (match) { pricing = match[1]; break; }
+    }
+  }
+
+  const costInput  = (promptTokens / 1_000_000) * pricing.input;
+  const costOutput = (completionTokens / 1_000_000) * pricing.output;
+  const estimatedCostUsd = costInput + costOutput;
+
+  return { promptTokens, completionTokens, totalTokens, estimatedCostUsd };
+}
+
+export function sumUsage(usages: (TokenUsage | null)[]): TokenUsage | null {
+  const valid = usages.filter((u): u is TokenUsage => u !== null);
+  if (valid.length === 0) return null;
   return {
-    promptTokens,
-    completionTokens,
-    totalTokens: promptTokens + completionTokens,
-    estimatedCostUsd: calcCostUsd(promptTokens, completionTokens, providerId, modelId),
+    promptTokens: valid.reduce((s, u) => s + u.promptTokens, 0),
+    completionTokens: valid.reduce((s, u) => s + u.completionTokens, 0),
+    totalTokens: valid.reduce((s, u) => s + u.totalTokens, 0),
+    estimatedCostUsd: valid.reduce((s, u) => s + u.estimatedCostUsd, 0),
   };
 }
 
-// ── Formatting helpers ────────────────────────────────────────────────────────
-
-export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
 export function formatCost(usd: number): string {
-  if (usd === 0)    return "$0.00";
-  if (usd < 0.0001) return "<$0.0001";
-  if (usd < 0.01)   return `$${usd.toFixed(4)}`;
-  if (usd < 1)      return `$${usd.toFixed(3)}`;
-  return `$${usd.toFixed(2)}`;
-}
-
-export function sumUsage(usages: (TokenUsage | undefined | null)[]): TokenUsage {
-  return usages.reduce<TokenUsage>(
-    (acc, u) => {
-      if (!u) return acc;
-      return {
-        promptTokens:     acc.promptTokens + u.promptTokens,
-        completionTokens: acc.completionTokens + u.completionTokens,
-        totalTokens:      acc.totalTokens + u.totalTokens,
-        estimatedCostUsd: acc.estimatedCostUsd + u.estimatedCostUsd,
-      };
-    },
-    { promptTokens: 0, completionTokens: 0, totalTokens: 0, estimatedCostUsd: 0 },
-  );
+  if (usd === 0) return "Free";
+  if (usd < 0.001) return "<$0.001";
+  return `$${usd.toFixed(4)}`;
 }

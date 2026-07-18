@@ -1,22 +1,25 @@
-/**
- * Tool definitions for the autonomous coding agent.
- * All providers (Groq, DeepSeek, Qwen) support these via OpenAI-compatible tool calling.
- *
- * IMPORTANT: stage_file only STAGES changes locally.
- * Nothing is pushed to GitHub until the user explicitly approves.
- */
+import type { Tool } from "@/types";
 
-export const AGENT_TOOLS = [
+export interface StagedFile {
+  path: string;
+  content: string | null; // null = deletion
+  originalContent?: string | null;
+  description: string;
+  action?: "create" | "modify" | "delete"; // delete requires special handling
+  sha?: string; // current file SHA for deletions
+}
+
+// Tools available to the agent for reading and searching the codebase
+const READ_TOOLS: Tool[] = [
   {
     type: "function",
     function: {
-      name: "read_file",
-      description:
-        "Read the current content of a file from the GitHub repository. Always read a file before modifying it.",
+      name: "list_files",
+      description: "List files and directories in a given path. Use / for root. Returns dir/file listing with size hints.",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "File path relative to repo root e.g. src/lib/auth.ts" },
+          path: { type: "string", description: "Directory path (e.g. /src, /src/components)" },
         },
         required: ["path"],
       },
@@ -25,13 +28,14 @@ export const AGENT_TOOLS = [
   {
     type: "function",
     function: {
-      name: "list_files",
-      description: "List files and directories at a given path in the repository. Use this to explore structure.",
+      name: "read_file",
+      description: "Read the content of a file given its path. Returns the full file contents as text. Max 2MB.",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "Directory path. Empty string for repo root.", default: "" },
+          path: { type: "string", description: "Full file path from repo root (e.g. /src/app/page.tsx)" },
         },
+        required: ["path"],
       },
     },
   },
@@ -39,44 +43,55 @@ export const AGENT_TOOLS = [
     type: "function",
     function: {
       name: "search_files",
-      description: "Search for a text pattern across files in the repository to locate relevant code.",
+      description: "Search across files using a regex or text pattern. Returns matching file paths and line numbers.",
       parameters: {
         type: "object",
         properties: {
-          pattern: { type: "string", description: "Text or function name to search for" },
-          path:    { type: "string", description: "Directory to search in. Defaults to root.", default: "" },
+          pattern: { type: "string", description: "Text or regex pattern to search for" },
+          path: { type: "string", description: "Optional: limit search to a specific directory" },
         },
         required: ["pattern"],
+      },
+    },
+  },
+];
+
+// Tools that write/modify files — only available in execution phase
+const EXECUTE_TOOLS: Tool[] = [
+  {
+    type: "function",
+    function: {
+      name: "stage_file",
+      description: "Stage a file for commit. If file exists, it creates a modification diff. If new, creates the file. Provide the FULL intended content of the file.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Full file path from repo root (e.g. /src/app/page.tsx)" },
+          content: { type: "string", description: "The COMPLETE new file content — never truncate or use placeholders" },
+          description: { type: "string", description: "Short summary of changes made" },
+        },
+        required: ["path", "content", "description"],
       },
     },
   },
   {
     type: "function",
     function: {
-      name: "stage_file",
-      description:
-        "Stage a file to be pushed to GitHub. Use this to create a new file or overwrite an existing one with your changes. Changes are NOT pushed until the user reviews and approves them.",
+      name: "delete_file",
+      description: "Stage a file for deletion from the repository. Requires the file's current SHA.",
       parameters: {
         type: "object",
         properties: {
-          path:        { type: "string", description: "File path e.g. src/components/Button.tsx" },
-          content:     { type: "string", description: "Complete file content to write" },
-          description: { type: "string", description: "Brief explanation of what changed and why" },
+          path: { type: "string", description: "Full file path from repo root to delete" },
+          reason: { type: "string", description: "Why this file should be deleted" },
         },
-        required: ["path", "content", "description"],
+        required: ["path", "reason"],
       },
     },
   },
 ];
 
-export interface StagedFile {
-  path: string;
-  content: string;
-  originalContent: string | null; // null = new file
-  description: string;
-}
-
-export interface ToolCallResult {
-  tool_call_id: string;
-  content: string;
+export function getAgentTools(phase: "plan" | "execute"): Tool[] {
+  if (phase === "plan") return READ_TOOLS;
+  return [...READ_TOOLS, ...EXECUTE_TOOLS];
 }

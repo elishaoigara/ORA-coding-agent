@@ -7,8 +7,12 @@ const config: Config = {
       fontFamily: {
         mono: ["var(--font-mono)", "monospace"],
       },
+      colors: {
+        agent: "rgb(var(--color-agent) / <alpha-value>)",
+        git: "rgb(var(--color-git) / <alpha-value>)",
+      },
     },
   },
-  plugins: [],
+  plugins: [require("@tailwindcss/typography")],
 };
 export default config;

@@ -2,19 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const GH_BASE = "https://api.github.com";
 
-const SKIP_DIRS = new Set([
-  "node_modules", ".git", ".next", "dist", "build",
-  ".vercel", "coverage", "__pycache__", ".venv", "venv",
-]);
-const SKIP_EXTS = new Set([
-  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
-  ".mp4", ".mp3", ".pdf", ".zip", ".woff", ".woff2", ".ttf",
-  ".eot", ".lock", ".lockb",
-]);
-
-function ghHeaders() {
-  const pat = process.env.GITHUB_PAT;
-  if (!pat) throw new Error("GITHUB_PAT is not set in .env.local");
+function ghHeaders(pat: string) {
   return {
     Authorization: `Bearer ${pat}`,
     Accept: "application/vnd.github+json",
@@ -22,277 +10,265 @@ function ghHeaders() {
   };
 }
 
-const readDirRecursive = async (
-  repo: string,
-  dirPath: string,
-  results: { path: string; content: string }[]
-): Promise<void> => {
-  const res = await fetch(
-    `${GH_BASE}/repos/${repo}/contents/${dirPath}`,
-    { headers: ghHeaders() }
-  );
-  if (!res.ok) return;
-  const items = await res.json();
-  if (!Array.isArray(items)) return;
+export async function POST(req: NextRequest) {
+  const pat = process.env.GITHUB_PAT;
+  if (!pat) return NextResponse.json({ error: "GITHUB_PAT not set" }, { status: 500 });
 
-  await Promise.all(
-    items.map(async (item: { type: string; name: string; path: string }) => {
-      if (item.type === "dir") {
-        if (SKIP_DIRS.has(item.name)) return;
-        await readDirRecursive(repo, item.path, results);
-      } else if (item.type === "file") {
-        const ext = "." + item.name.split(".").pop()?.toLowerCase();
-        if (SKIP_EXTS.has(ext)) return;
-        const fileRes = await fetch(
-          `${GH_BASE}/repos/${repo}/contents/${item.path}`,
-          { headers: ghHeaders() }
-        );
-        if (!fileRes.ok) return;
-        const fileData = await fileRes.json();
-        if (!fileData.content) return;
-        try {
-          const content = Buffer.from(fileData.content, "base64").toString("utf-8");
-          results.push({ path: item.path, content });
-        } catch { /* binary — skip */ }
-      }
-    })
-  );
-};
-
-// ── GET ───────────────────────────────────────────────────────────────────────
-export async function GET(req: NextRequest) {
-  const { searchParams } = req.nextUrl;
-  const action = searchParams.get("action");
+  const headers = ghHeaders(pat);
+  let body: { action: string; repo: string; [k: string]: unknown };
 
   try {
-    if (action === "repos") {
-      const res = await fetch(
-        `${GH_BASE}/user/repos?sort=pushed&per_page=50&type=all`,
-        { headers: ghHeaders() }
-      );
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      return NextResponse.json(
-        data.map((r: Record<string, unknown>) => ({
-          name: r.name,
-          full_name: r.full_name,
-          description: r.description,
-          private: r.private,
-          default_branch: r.default_branch,
-        }))
-      );
-    }
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
-    if (action === "contents") {
-      const repo = searchParams.get("repo") ?? "";
-      const path = searchParams.get("path") ?? "";
-      const res = await fetch(
-        `${GH_BASE}/repos/${repo}/contents/${path}`,
-        { headers: ghHeaders() }
-      );
-      if (!res.ok) throw new Error(await res.text());
-      return NextResponse.json(await res.json());
-    }
+  const { action, repo } = body;
+  if (!action || !repo) return NextResponse.json({ error: "Missing action or repo" }, { status: 400 });
 
-    if (action === "file") {
-      const repo = searchParams.get("repo") ?? "";
-      const path = searchParams.get("path") ?? "";
-      const res = await fetch(
-        `${GH_BASE}/repos/${repo}/contents/${path}`,
-        { headers: ghHeaders() }
-      );
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      const content = Buffer.from(data.content, "base64").toString("utf-8");
-      return NextResponse.json({ content, sha: data.sha });
-    }
-
-    if (action === "read_all") {
-      const repo = searchParams.get("repo") ?? "";
-      const path = searchParams.get("path") ?? "";
-      const results: { path: string; content: string }[] = [];
-      await readDirRecursive(repo, path, results);
-      return NextResponse.json({ files: results });
-    }
-
-    if (action === "branches") {
-      const repo = searchParams.get("repo") ?? "";
-      const res = await fetch(
-        `${GH_BASE}/repos/${repo}/branches?per_page=50`,
-        { headers: ghHeaders() }
-      );
-      if (!res.ok) throw new Error(await res.text());
+  try {
+    // ── List branches ──────────────────────────────────────────────────────
+    if (action === "list_branches") {
+      const res = await fetch(`${GH_BASE}/repos/${repo}/branches?per_page=100`, { headers });
+      if (!res.ok) return NextResponse.json({ error: `GitHub error: ${res.status}` });
       const data = await res.json();
       return NextResponse.json(data.map((b: { name: string }) => b.name));
     }
 
-    return NextResponse.json({ error: "Unknown action" }, { status: 400 });
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
-  }
-}
-
-// ── POST ──────────────────────────────────────────────────────────────────────
-export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { action } = body;
-
-  try {
-    // ── push_many: commit multiple files ──────────────────────────────────────
-    if (action === "push_many") {
-      const { repo, files, message, branch } = body as {
-        repo: string;
-        files: { path: string; content: string }[];
-        message: string;
-        branch?: string;
-      };
-
-      const repoRes = await fetch(`${GH_BASE}/repos/${repo}`, { headers: ghHeaders() });
-      if (!repoRes.ok) throw new Error(await repoRes.text());
-      const repoData = await repoRes.json();
-      const targetBranch = branch?.trim() || repoData.default_branch;
-
-      const refRes = await fetch(
-        `${GH_BASE}/repos/${repo}/git/refs/heads/${targetBranch}`,
-        { headers: ghHeaders() }
-      );
-      if (!refRes.ok) throw new Error(`Branch "${targetBranch}" not found: ${await refRes.text()}`);
-      const refData = await refRes.json();
-      const parentSha = refData.object.sha;
-
-      const parentRes = await fetch(
-        `${GH_BASE}/repos/${repo}/git/commits/${parentSha}`,
-        { headers: ghHeaders() }
-      );
-      const parentData = await parentRes.json();
-      const baseTreeSha = parentData.tree.sha;
-
-      // Create blobs sequentially to avoid GitHub rate limits on large pushes
-      const treeItems: { path: string; mode: string; type: string; sha: string }[] = [];
-      for (const { path, content } of files) {
-        const blobRes = await fetch(`${GH_BASE}/repos/${repo}/git/blobs`, {
-          method: "POST",
-          headers: { ...ghHeaders(), "Content-Type": "application/json" },
-          body: JSON.stringify({ content, encoding: "utf-8" }),
-        });
-        if (!blobRes.ok) {
-          const errText = await blobRes.text();
-          throw new Error(`Failed to create blob for "${path}": ${errText}`);
-        }
-        const blob = await blobRes.json();
-        if (!blob.sha) throw new Error(`Blob SHA missing for "${path}": ${JSON.stringify(blob)}`);
-        treeItems.push({ path, mode: "100644", type: "blob", sha: blob.sha });
-      }
-
-      const treeRes = await fetch(`${GH_BASE}/repos/${repo}/git/trees`, {
-        method: "POST",
-        headers: { ...ghHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ base_tree: baseTreeSha, tree: treeItems }),
-      });
-      if (!treeRes.ok) throw new Error(`Failed to create tree: ${await treeRes.text()}`);
-      const treeData = await treeRes.json();
-      if (!treeData.sha) throw new Error(`Tree SHA missing: ${JSON.stringify(treeData)}`);
-
-      const commitRes = await fetch(`${GH_BASE}/repos/${repo}/git/commits`, {
-        method: "POST",
-        headers: { ...ghHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ message, tree: treeData.sha, parents: [parentSha] }),
-      });
-      if (!commitRes.ok) throw new Error(`Failed to create commit: ${await commitRes.text()}`);
-      const commitData = await commitRes.json();
-      if (!commitData.sha) throw new Error(`Commit SHA missing: ${JSON.stringify(commitData)}`);
-
-      const updateRes = await fetch(
-        `${GH_BASE}/repos/${repo}/git/refs/heads/${targetBranch}`,
-        {
-          method: "PATCH",
-          headers: { ...ghHeaders(), "Content-Type": "application/json" },
-          body: JSON.stringify({ sha: commitData.sha }),
-        }
-      );
-      if (!updateRes.ok) throw new Error(await updateRes.text());
-
-      const commitUrl = `https://github.com/${repo}/commit/${commitData.sha}`;
-      return NextResponse.json({
-        success: true,
-        branch:  targetBranch,
-        commit:  commitData.sha.slice(0, 7),
-        url:     commitUrl,
-        files:   files.map((f) => f.path),
-      });
-    }
-
-    // ── create_pr: open a pull request after agent push ───────────────────────
-    if (action === "create_pr") {
-      const { repo, head, base, title, body: prBody } = body as {
-        repo:  string;
-        head:  string;
-        base:  string;
-        title: string;
-        body:  string;
-      };
-
-      const prRes = await fetch(`${GH_BASE}/repos/${repo}/pulls`, {
-        method: "POST",
-        headers: { ...ghHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ title, body: prBody, head, base }),
-      });
-
-      if (!prRes.ok) {
-        const errText = await prRes.text();
-        if (prRes.status === 422 && errText.includes("already exists")) {
-          return NextResponse.json({ success: true, alreadyExists: true });
-        }
-        throw new Error(errText);
-      }
-
-      const prData = await prRes.json();
-      return NextResponse.json({
-        success: true,
-        number:  prData.number,
-        url:     prData.html_url,
-        title:   prData.title,
-      });
-    }
-
-    // ── create_branch: create a branch before agent execution ─────────────────
+    // ── Create branch ──────────────────────────────────────────────────────
     if (action === "create_branch") {
-      const { repo, branchName, fromBranch } = body as {
-        repo:       string;
-        branchName: string;
-        fromBranch?: string;
-      };
+      const branchName = body.branchName as string;
+      if (!branchName) return NextResponse.json({ error: "Missing branchName" }, { status: 400 });
 
-      const repoRes = await fetch(`${GH_BASE}/repos/${repo}`, { headers: ghHeaders() });
-      const repoData = await repoRes.json();
-      const baseBranch = fromBranch?.trim() || repoData.default_branch;
+      // Get default branch SHA
+      const repoRes = await fetch(`${GH_BASE}/repos/${repo}/git/refs/heads/main`, { headers });
+      const defaultBranchRes = await fetch(`${GH_BASE}/repos/${repo}/git/refs/heads/master`, { headers });
 
-      const refRes = await fetch(
-        `${GH_BASE}/repos/${repo}/git/refs/heads/${baseBranch}`,
-        { headers: ghHeaders() }
-      );
-      if (!refRes.ok) throw new Error(`Base branch "${baseBranch}" not found`);
-      const refData = await refRes.json();
-      const sha = refData.object.sha;
+      let sha: string;
+      let sourceBranch: string;
+      if (repoRes.ok) {
+        const data = await repoRes.json();
+        sha = data.object.sha;
+        sourceBranch = "main";
+      } else if (defaultBranchRes.ok) {
+        const data = await defaultBranchRes.json();
+        sha = data.object.sha;
+        sourceBranch = "master";
+      } else {
+        const defaultInfo = await fetch(`${GH_BASE}/repos/${repo}`, { headers });
+        if (!defaultInfo.ok) return NextResponse.json({ error: "Cannot determine default branch" }, { status: 500 });
+        const repoData = await defaultInfo.json();
+        const defBranch = repoData.default_branch;
+        const refRes = await fetch(`${GH_BASE}/repos/${repo}/git/refs/heads/${defBranch}`, { headers });
+        if (!refRes.ok) return NextResponse.json({ error: "Cannot get default branch ref" }, { status: 500 });
+        const refData = await refRes.json();
+        sha = refData.object.sha;
+        sourceBranch = defBranch;
+      }
 
       const createRes = await fetch(`${GH_BASE}/repos/${repo}/git/refs`, {
         method: "POST",
-        headers: { ...ghHeaders(), "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha }),
       });
 
       if (!createRes.ok) {
-        const errText = await createRes.text();
-        if (createRes.status === 422 && errText.includes("already exists")) {
-          return NextResponse.json({ success: true, alreadyExists: true, branch: branchName });
+        const errData = await createRes.json();
+        if (errData.errors?.[0]?.code === "ReferenceCreationError") {
+          return NextResponse.json({ success: true, branch: branchName, note: "Already exists" });
         }
-        throw new Error(errText);
+        return NextResponse.json({ error: `Failed to create branch: ${JSON.stringify(errData)}` }, { status: 500 });
       }
 
-      return NextResponse.json({ success: true, branch: branchName, from: baseBranch });
+      return NextResponse.json({ success: true, branch: branchName, source: sourceBranch, sha });
     }
 
-    return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+    // ── List files in a directory ──────────────────────────────────────────
+    if (action === "list_files") {
+      const path = (body.path as string) ?? "";
+      const res = await fetch(`${GH_BASE}/repos/${repo}/contents/${encodeURI(path)}`, { headers });
+      if (!res.ok) {
+        if (res.status === 404) return NextResponse.json({ error: "Path not found" }, { status: 404 });
+        return NextResponse.json({ error: `GitHub error: ${res.status}` });
+      }
+      const data = await res.json();
+      if (!Array.isArray(data)) return NextResponse.json([data]);
+      return NextResponse.json(
+        data.map((i: { name: string; path: string; type: string; size?: number }) => ({
+          name: i.name, path: i.path, type: i.type, size: i.size,
+        }))
+      );
+    }
+
+    // ── Get file content ───────────────────────────────────────────────────
+    if (action === "file") {
+      const path = (body.path as string) ?? "";
+      const res = await fetch(`${GH_BASE}/repos/${repo}/contents/${encodeURI(path)}`, { headers });
+      if (!res.ok) {
+        if (res.status === 404) return NextResponse.json({ error: "File not found" }, { status: 404 });
+        return NextResponse.json({ error: `GitHub error: ${res.status}` });
+      }
+      const data = await res.json();
+      if (!data.content) return NextResponse.json({ error: "Empty or binary file" });
+      return NextResponse.json({
+        path: data.path,
+        content: Buffer.from(data.content, "base64").toString("utf-8"),
+        size: data.size,
+        sha: data.sha,
+      });
+    }
+
+    // ── Push many files (blobs -> tree -> commit -> update ref) ────────────
+    if (action === "push_many") {
+      const files = body.files as { path: string; content: string | null; action?: string }[];
+      const message = (body.message as string) ?? "feat: AI agent changes";
+      const branch = (body.branch as string) ?? undefined;
+
+      if (!files || !files.length) {
+        return NextResponse.json({ error: "No files provided" }, { status: 400 });
+      }
+
+      // Determine branch to push to
+      let targetBranch: string;
+      if (branch) {
+        targetBranch = branch;
+        // Ensure branch exists
+        const branchCheck = await fetch(`${GH_BASE}/repos/${repo}/git/refs/heads/${encodeURIComponent(branch)}`, { headers });
+        if (!branchCheck.ok) {
+          return NextResponse.json({ error: `Branch "${branch}" does not exist. Create it first.` }, { status: 400 });
+        }
+      } else {
+        // Get default branch
+        const repoInfo = await fetch(`${GH_BASE}/repos/${repo}`, { headers });
+        if (!repoInfo.ok) return NextResponse.json({ error: "Cannot fetch repo info" }, { status: 500 });
+        const repoData = await repoInfo.json();
+        targetBranch = repoData.default_branch;
+      }
+
+      // Get the current HEAD commit SHA for the branch
+      const refRes = await fetch(`${GH_BASE}/repos/${repo}/git/refs/heads/${encodeURIComponent(targetBranch)}`, { headers });
+      if (!refRes.ok) {
+        return NextResponse.json({ error: `Cannot get ref for ${targetBranch}: ${refRes.status}` }, { status: 500 });
+      }
+      const refData = await refRes.json();
+      const headSha: string = refData.object.sha;
+
+      // Create blobs for files with content, handle deletions
+      const treeEntries: Array<{
+        path: string; mode: "100644"; type: "blob"; sha?: string; content?: string;
+      }> = [];
+
+      for (const file of files) {
+        if (file.content === null || file.action === "delete") {
+          // Deletion: first get the file's current SHA from the tree
+          const existingRes = await fetch(`${GH_BASE}/repos/${repo}/contents/${encodeURI(file.path)}`, { headers });
+          if (existingRes.ok) {
+            const existingData = await existingRes.json();
+            treeEntries.push({
+              path: file.path,
+              mode: "100644",
+              type: "blob",
+              sha: null as unknown as string, // null SHA signals deletion
+            });
+          }
+          // If file doesn't exist, skip it silently
+          continue;
+        }
+
+        // Create blob for the file content
+        const blobRes = await fetch(`${GH_BASE}/repos/${repo}/git/blobs`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            content: file.content,
+            encoding: "utf-8",
+          }),
+        });
+
+        if (!blobRes.ok) {
+          const errText = await blobRes.text();
+          return NextResponse.json({
+            error: `Failed to create blob for ${file.path}: ${errText}`,
+          }, { status: 500 });
+        }
+
+        const blobData = await blobRes.json();
+        treeEntries.push({
+          path: file.path,
+          mode: "100644",
+          type: "blob",
+          sha: blobData.sha,
+        });
+      }
+
+      if (treeEntries.length === 0) {
+        return NextResponse.json({ error: "No changes to push (all files were deletions of non-existent files?)" }, { status: 400 });
+      }
+
+      // Create tree
+      const treeRes = await fetch(`${GH_BASE}/repos/${repo}/git/trees`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          base_tree: headSha,
+          tree: treeEntries,
+        }),
+      });
+
+      if (!treeRes.ok) {
+        const errText = await treeRes.text();
+        return NextResponse.json({ error: `Failed to create tree: ${errText}` }, { status: 500 });
+      }
+
+      const treeData = await treeRes.json();
+      const treeSha: string = treeData.sha;
+
+      // Create commit
+      const commitRes = await fetch(`${GH_BASE}/repos/${repo}/git/commits`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          message,
+          tree: treeSha,
+          parents: [headSha],
+        }),
+      });
+
+      if (!commitRes.ok) {
+        const errText = await commitRes.text();
+        return NextResponse.json({ error: `Failed to create commit: ${errText}` }, { status: 500 });
+      }
+
+      const commitData = await commitRes.json();
+      const commitSha: string = commitData.sha;
+
+      // Update ref (fast-forward)
+      const patchRes = await fetch(`${GH_BASE}/repos/${repo}/git/refs/heads/${encodeURIComponent(targetBranch)}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ sha: commitSha, force: false }),
+      });
+
+      if (!patchRes.ok) {
+        const errText = await patchRes.text();
+        return NextResponse.json({
+          error: `Failed to update ref: ${errText}`,
+          commit: commitSha,
+          tree: treeSha,
+        }, { status: 500 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        commit: commitSha.slice(0, 7),
+        branch: targetBranch,
+        files: files.filter((f) => f.content !== null || f.action !== "delete").length,
+        deletions: files.filter((f) => f.content === null || f.action === "delete").length,
+        url: `https://github.com/${repo}/commit/${commitSha}`,
+      });
+    }
+
+    return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }

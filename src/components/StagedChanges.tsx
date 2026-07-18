@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { StagedFile } from "@/lib/agentTools";
 
 interface Props {
@@ -9,6 +9,7 @@ interface Props {
   onPush: (files: StagedFile[]) => void;
   onDiscard: () => void;
   onOpenArtifact?: (lang: string, code: string, path?: string) => void;
+  defaultBranch?: string;
 }
 
 // ── Myers diff algorithm ──────────────────────────────────────────────────────
@@ -158,14 +159,15 @@ function FileDiff({ file, selected, onToggleSelect, onOpenArtifact }: {
   const [view, setView] = useState<"diff" | "full">("diff");
 
   const isNew = file.originalContent === null;
-  const diff = !isNew && file.originalContent != null
-    ? myersDiff(file.originalContent.split("\n"), file.content.split("\n"))
+  const isDelete = file.action === "delete";
+  const diff = !isNew && file.originalContent != null && !isDelete
+    ? myersDiff(file.originalContent.split("\n"), (file.content ?? "").split("\n"))
     : null;
 
   const contextLines = diff ? contextDiff(diff) : null;
 
-  const addedLines   = diff?.filter((l) => l.type === "add").length    ?? file.content.split("\n").length;
-  const removedLines = diff?.filter((l) => l.type === "remove").length ?? 0;
+  const addedLines = diff?.filter((l) => l.type === "add").length ?? (isDelete ? 0 : (file.content ?? "").split("\n").length);
+  const removedLines = diff?.filter((l) => l.type === "remove").length ?? (isDelete ? (file.originalContent ?? "").split("\n").length : 0);
 
   return (
     <div className={`border rounded-lg overflow-hidden transition-colors ${
@@ -195,21 +197,21 @@ function FileDiff({ file, selected, onToggleSelect, onOpenArtifact }: {
           onClick={() => setExpanded((e) => !e)}
         >
           <span className={`text-xs font-medium px-1.5 py-0.5 rounded flex-shrink-0 ${
-            isNew ? "bg-teal-900 text-teal-300" : "bg-amber-900 text-amber-300"
+            isDelete ? "bg-red-900 text-red-300" : isNew ? "bg-teal-900 text-teal-300" : "bg-amber-900 text-amber-300"
           }`}>
-            {isNew ? "NEW" : "MOD"}
+            {isDelete ? "DEL" : isNew ? "NEW" : "MOD"}
           </span>
           <span className="text-zinc-200 text-xs font-mono truncate">{file.path}</span>
         </button>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-teal-400 text-xs">+{addedLines}</span>
+          {!isDelete && <span className="text-teal-400 text-xs">+{addedLines}</span>}
           {removedLines > 0 && <span className="text-red-400 text-xs">-{removedLines}</span>}
-          {onOpenArtifact && (
+          {onOpenArtifact && !isDelete && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onOpenArtifact(langFromPath(file.path), file.content, file.path);
+                onOpenArtifact(langFromPath(file.path), file.content ?? "", file.path);
               }}
               title="Open full file in split view"
               className="flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-teal-300 hover:bg-zinc-700 transition-colors"
@@ -231,7 +233,7 @@ function FileDiff({ file, selected, onToggleSelect, onOpenArtifact }: {
       {/* Diff / full content */}
       {expanded && (
         <>
-          {diff && (
+          {diff && !isDelete && (
             <div className="flex gap-2 px-4 py-2 bg-zinc-900 border-b border-zinc-700/60">
               <button
                 onClick={() => setView("diff")}
@@ -249,7 +251,9 @@ function FileDiff({ file, selected, onToggleSelect, onOpenArtifact }: {
           )}
 
           <div className="max-h-72 overflow-y-auto font-mono text-xs">
-            {view === "diff" && contextLines ? (
+            {isDelete ? (
+              <div className="px-4 py-3 text-red-400 text-xs">File marked for deletion</div>
+            ) : view === "diff" && contextLines ? (
               <div>
                 {contextLines.map((line, i) => (
                   <div
@@ -288,13 +292,18 @@ function FileDiff({ file, selected, onToggleSelect, onOpenArtifact }: {
 }
 
 // ── Main StagedChanges ────────────────────────────────────────────────────────
-export default function StagedChanges({ files, repo, onPush, onDiscard, onOpenArtifact }: Props) {
+export default function StagedChanges({ files, repo, onPush, onDiscard, onOpenArtifact, defaultBranch }: Props) {
   const [commitMsg, setCommitMsg] = useState("feat: AI agent changes");
-  const [branch, setBranch]       = useState("");
+  const [branch, setBranch]       = useState(defaultBranch ?? "");
   const [pushing, setPushing]     = useState(false);
   const [pushResult, setPushResult] = useState<{ success: boolean; message: string; url?: string } | null>(null);
   // UI improvement #2: per-file selection
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set(files.map((f) => f.path)));
+
+  // Sync branch when defaultBranch prop changes
+  useEffect(() => {
+    if (defaultBranch) setBranch(defaultBranch);
+  }, [defaultBranch]);
 
   function toggleFile(path: string) {
     setSelectedPaths((prev) => {
@@ -327,9 +336,9 @@ export default function StagedChanges({ files, repo, onPush, onDiscard, onOpenAr
         body: JSON.stringify({
           action: "push_many",
           repo,
-          files: selectedFiles.map((f) => ({ path: f.path, content: f.content })),
+          files: selectedFiles.map((f) => ({ path: f.path, content: f.content, action: f.action })),
           message: commitMsg,
-          branch: branch.trim() || undefined,
+          branch: branch.trim() || defaultBranch || undefined,
         }),
       });
       const data = await res.json();

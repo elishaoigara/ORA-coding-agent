@@ -2,6 +2,15 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
+:root {
+  --color-agent: 139 92 246; /* violet */
+  --color-git: 20 184 166; /* teal */
+  --color-warn: 245 158 11; /* amber */
+  --color-danger: 239 68 68;
+  --color-bg: 9 9 11;
+  --color-surface: 24 24 27;
+}
+
 * {
   box-sizing: border-box;
 }
