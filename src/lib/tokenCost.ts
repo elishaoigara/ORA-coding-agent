@@ -112,3 +112,9 @@ export function formatCost(usd: number): string {
   if (usd < 0.001) return "<$0.001";
   return `$${usd.toFixed(4)}`;
 }
+
+export function formatTokens(tokens: number): string {
+  if (tokens < 1000) return tokens.toString();
+  if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}K`;
+  return `${(tokens / 1_000_000).toFixed(1)}M`;
+}
