@@ -10,30 +10,37 @@ export interface ProviderConfig {
   baseUrl: string;
   apiKey: string;
   defaultModel: string;
-  models: { id: string; label: string }[];
+  models: ModelConfig[];
 }
 
-const PROVIDERS: Record<Exclude<ProviderId, "auto">, ProviderConfig> = {
-  openrouter: {
-  name: "OpenRouter (free)",
-  baseUrl: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY ?? "",
-  defaultModel: "deepseek/deepseek-v4-flash:free",
-  models: [
-    // ── Free coding models (updated May 2026) ─────────────────────────
-    { id: "deepseek/deepseek-v4-flash:free",               label: "DeepSeek V4 Flash ★ (1M ctx)" },
-    { id: "qwen/qwen3-coder:free",                         label: "Qwen3 Coder (262K ctx)" },
-    { id: "openai/gpt-oss-120b:free",                      label: "OpenAI gpt-oss-120B (131K ctx)" },
-    { id: "google/gemini-2.0-flash-exp:free",              label: "Gemini 2.0 Flash (1M ctx)" },
-    { id: "z-ai/glm-4.5-air:free",                         label: "GLM 4.5 Air (131K ctx)" },
-    { id: "meta-llama/llama-3.3-70b-instruct:free",        label: "LLaMA 3.3 70B (131K ctx)" },
-    { id: "qwen/qwen3-235b-a22b:free",                     label: "Qwen3 235B (131K ctx)" },
-    { id: "microsoft/mai-ds-r1:free",                      label: "Microsoft MAI-DS-R1 (163K ctx)" },
-    { id: "nousresearch/hermes-3-llama-3.1-405b:free",     label: "Hermes 3 405B (131K ctx)" },
-    { id: "deepseek/deepseek-r1:free",                     label: "DeepSeek R1 Reasoning (163K ctx)" },
-    { id: "deepseek/deepseek-chat:free",                   label: "DeepSeek V3 Chat (163K ctx)" },
-  ],
-},
+export interface ModelConfig {
+  id: string;
+  label: string;
+  contextWindow?: number;
+}
+
+export interface PublicProvider {
+  id: ProviderId;
+  name: string;
+  configured: boolean;
+  defaultModel: string;
+  models: ModelConfig[];
+}
+
+// ── Deprecated model remapping ────────────────────────────────────────────────
+const DEPRECATED_MODEL_MAP: Record<string, string> = {
+  "deepseek-reasoner": "deepseek/deepseek-chat:free",
+  "deepseek-chat": "deepseek/deepseek-chat:free",
+};
+
+export function resolveModel(modelId: string): string {
+  return DEPRECATED_MODEL_MAP[modelId] ?? modelId;
+}
+
+// ── Provider definitions ──────────────────────────────────────────────────────
+type RealProviderId = Exclude<ProviderId, "auto">;
+
+const PROVIDERS: Record<RealProviderId, Omit<ProviderConfig, "apiKey">> = {
   groq: {
     id: "groq",
     name: "Groq",
@@ -94,12 +101,37 @@ const PROVIDERS: Record<Exclude<ProviderId, "auto">, ProviderConfig> = {
   },
 };
 
-export function getProvider(id?: string): ProviderConfig {
-  const key = (id ?? process.env.ACTIVE_PROVIDER ?? "groq") as Exclude<ProviderId, "auto">;
-  const config = PROVIDERS[key];
-  if (!config) throw new Error(`Unknown provider: "${key}"`);
-  if (!config.apiKey) throw new Error(`Missing API key for provider "${key}". Add it to .env.local`);
-  return config;
+// ── Config helpers ────────────────────────────────────────────────────────────
+function getApiKey(providerId: ProviderId): string {
+  const keyMap: Record<ProviderId, string | undefined> = {
+    groq:      process.env.GROQ_API_KEY,
+    deepseek:  process.env.DEEPSEEK_API_KEY,
+    qwen:      process.env.QWEN_API_KEY || process.env.DASHSCOPE_API_KEY,
+    openai:    process.env.OPENAI_API_KEY,
+    openrouter: process.env.OPENROUTER_API_KEY,
+    auto:      undefined,
+  };
+  const key = keyMap[providerId];
+  if (!key) throw new Error(`${providerId} API key not configured`);
+  return key;
+}
+
+export function getProvider(providerId?: string): ProviderConfig {
+  const id = (providerId || "auto") as ProviderId;
+  if (id === "auto") {
+    return {
+      id: "auto",
+      name: "Auto Router",
+      baseUrl: "",
+      apiKey: "",
+      defaultModel: "",
+      models: [],
+    };
+  }
+  const cfg = PROVIDERS[id as RealProviderId];
+  if (!cfg) throw new Error(`Unknown provider: ${id}`);
+  const apiKey = getApiKey(id);
+  return { ...cfg, apiKey };
 }
 
 export function getAllPublicProviders(): PublicProvider[] {
