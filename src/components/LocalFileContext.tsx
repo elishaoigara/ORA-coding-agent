@@ -140,7 +140,7 @@ export default function LocalFileContext({ onFilesLoaded, compact }: Props) {
           type="button"
           onClick={() => inputRef.current?.click()}
           title={loaded.length > 0 ? `${loaded.length} file(s) attached` : "Attach files or ZIP"}
-          className="flex items-center justify-center w-[46px] h-[46px] rounded-xl transition-colors text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 relative"
+          className="flex items-center justify-center w-[46px] h-[46px] rounded-xl transition-colors text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 light:text-[#8a7f6d] light:hover:text-[#2b2620] light:hover:bg-[#efe9dd] relative"
         >
           {loading ? (
             <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -160,7 +160,7 @@ export default function LocalFileContext({ onFilesLoaded, compact }: Props) {
           )}
         </button>
         {error && (
-          <p className="absolute bottom-full mb-1 left-0 text-xs text-red-400 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 whitespace-nowrap z-50">
+          <p className="absolute bottom-full mb-1 left-0 text-xs text-red-400 light:text-red-600 bg-zinc-900 light:bg-white border border-zinc-700 light:border-red-300 rounded px-2 py-1 whitespace-nowrap z-50">
             {error}
           </p>
         )}
@@ -179,28 +179,28 @@ export default function LocalFileContext({ onFilesLoaded, compact }: Props) {
         onClick={() => inputRef.current?.click()}
         className={`border border-dashed rounded-lg px-4 py-3 cursor-pointer text-center transition-colors select-none ${
           dragging
-            ? "border-teal-500 bg-teal-950/40 text-teal-300"
-            : "border-zinc-700 hover:border-zinc-500 text-zinc-500 hover:text-zinc-400"
+            ? "border-teal-500 bg-teal-950/40 light:bg-teal-50 text-teal-300 light:text-teal-700"
+            : "border-zinc-700 hover:border-zinc-500 text-zinc-500 hover:text-zinc-400 light:border-[#ddd3bd] light:hover:border-[#c7bda8] light:text-[#8a7f6d] light:hover:text-[#6b6255]"
         }`}
       >
         {loading
           ? <span className="text-xs">Extracting files…</span>
-          : <span className="text-xs">↓ Drop files or ZIP here<span className="hidden sm:inline text-zinc-600"> — or click to browse</span></span>
+          : <span className="text-xs">↓ Drop files or ZIP here<span className="hidden sm:inline text-zinc-600 light:text-[#a89e8c]"> — or click to browse</span></span>
         }
       </div>
-      {error && <p className="mt-1.5 text-xs text-red-400">{error}</p>}
+      {error && <p className="mt-1.5 text-xs text-red-400 light:text-red-600">{error}</p>}
       {loaded.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {loaded.map((item, i) => (
-            <span key={i} className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-xs text-zinc-400">
-              <span className="text-teal-400">📁</span>
+            <span key={i} className="inline-flex items-center gap-1 bg-zinc-800 light:bg-[#efe9dd] border border-zinc-700 light:border-[#ddd3bd] rounded px-2 py-0.5 text-xs text-zinc-400 light:text-[#6b6255]">
+              <span className="text-teal-400 light:text-teal-600">📁</span>
               {item.name}
-              {item.count > 1 && <span className="text-zinc-600">({item.count})</span>}
+              {item.count > 1 && <span className="text-zinc-600 light:text-[#a89e8c]">({item.count})</span>}
             </span>
           ))}
           <button
             onClick={(e) => { e.stopPropagation(); setLoaded([]); onFilesLoaded([]); }}
-            className="text-xs text-zinc-600 hover:text-red-400 transition-colors"
+            className="text-xs text-zinc-600 hover:text-red-400 light:text-[#a89e8c] light:hover:text-red-600 transition-colors"
           >clear</button>
         </div>
       )}

@@ -87,63 +87,63 @@ export default function PushToGitHub({ repo, files, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div className="bg-zinc-900 light:bg-white border border-zinc-700 light:border-[#e5ded1] rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 light:border-[#e5ded1]">
           <div>
-            <h2 className="text-zinc-100 font-semibold text-sm">Push to GitHub</h2>
-            <p className="text-zinc-500 text-xs mt-0.5">{repo}</p>
+            <h2 className="text-zinc-100 light:text-[#2b2620] font-semibold text-sm">Push to GitHub</h2>
+            <p className="text-zinc-500 light:text-[#8a7f6d] text-xs mt-0.5">{repo}</p>
           </div>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 text-lg">✕</button>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 light:text-[#8a7f6d] light:hover:text-[#2b2620] text-lg">✕</button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {/* Commit message */}
           <div>
-            <label className="text-zinc-400 text-xs mb-1 block">Commit message</label>
+            <label className="text-zinc-400 light:text-[#6b6255] text-xs mb-1 block">Commit message</label>
             <input
               value={commitMsg}
               onChange={(e) => setCommitMsg(e.target.value)}
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 text-sm focus:outline-none focus:border-teal-600"
+              className="w-full bg-zinc-800 light:bg-[#faf8f4] border border-zinc-700 light:border-[#ddd3bd] rounded-lg px-3 py-2 text-zinc-100 light:text-[#2b2620] text-sm focus:outline-none focus:border-teal-600"
             />
           </div>
 
           {/* Branch (optional) */}
           <div>
-            <label className="text-zinc-400 text-xs mb-1 block">
-              Branch <span className="text-zinc-600">(leave empty for default)</span>
+            <label className="text-zinc-400 light:text-[#6b6255] text-xs mb-1 block">
+              Branch <span className="text-zinc-600 light:text-[#a89e8c]">(leave empty for default)</span>
             </label>
             <input
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
               placeholder="main"
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 text-sm focus:outline-none focus:border-teal-600 placeholder:text-zinc-600"
+              className="w-full bg-zinc-800 light:bg-[#faf8f4] border border-zinc-700 light:border-[#ddd3bd] rounded-lg px-3 py-2 text-zinc-100 light:text-[#2b2620] text-sm focus:outline-none focus:border-teal-600 placeholder:text-zinc-600 light:placeholder:text-[#a89e8c]"
             />
           </div>
 
           {/* Files */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-zinc-400 text-xs">Files to push ({fileList.length})</label>
-              <button onClick={addFile} className="text-xs text-teal-400 hover:text-teal-300">+ add file</button>
+              <label className="text-zinc-400 light:text-[#6b6255] text-xs">Files to push ({fileList.length})</label>
+              <button onClick={addFile} className="text-xs text-teal-400 hover:text-teal-300 light:text-teal-700 light:hover:text-teal-600">+ add file</button>
             </div>
             <div className="space-y-3">
               {fileList.map((f, i) => (
-                <div key={i} className="bg-zinc-800 border border-zinc-700 rounded-lg p-3 space-y-2">
+                <div key={i} className="bg-zinc-800 light:bg-[#faf8f4] border border-zinc-700 light:border-[#ddd3bd] rounded-lg p-3 space-y-2">
                   <div className="flex items-center gap-2">
                     <input
                       value={f.path}
                       onChange={(e) => updatePath(i, e.target.value)}
-                      className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-teal-300 text-xs font-mono focus:outline-none focus:border-teal-600"
+                      className="flex-1 bg-zinc-900 light:bg-white border border-zinc-700 light:border-[#ddd3bd] rounded px-2 py-1 text-teal-300 light:text-teal-700 text-xs font-mono focus:outline-none focus:border-teal-600"
                       placeholder="src/components/MyFile.tsx"
                     />
-                    <button onClick={() => removeFile(i)} className="text-zinc-600 hover:text-red-400 text-xs">✕</button>
+                    <button onClick={() => removeFile(i)} className="text-zinc-600 hover:text-red-400 light:text-[#a89e8c] light:hover:text-red-600 text-xs">✕</button>
                   </div>
                   <textarea
                     value={f.content}
                     onChange={(e) => updateContent(i, e.target.value)}
                     rows={6}
-                    className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-zinc-300 text-xs font-mono resize-y focus:outline-none focus:border-teal-600"
+                    className="w-full bg-zinc-950 light:bg-white border border-zinc-700 light:border-[#ddd3bd] rounded px-2 py-1.5 text-zinc-300 light:text-[#4a4335] text-xs font-mono resize-y focus:outline-none focus:border-teal-600"
                   />
                 </div>
               ))}
@@ -153,8 +153,8 @@ export default function PushToGitHub({ repo, files, onClose }: Props) {
           {result && (
             <div className={`rounded-lg px-4 py-3 text-sm ${
               result.success
-                ? "bg-teal-950 border border-teal-800 text-teal-300"
-                : "bg-red-950 border border-red-800 text-red-300"
+                ? "bg-teal-950 light:bg-teal-50 border border-teal-800 light:border-teal-300 text-teal-300 light:text-teal-800"
+                : "bg-red-950 light:bg-red-50 border border-red-800 light:border-red-300 text-red-300 light:text-red-700"
             }`}>
               <p>{result.message}</p>
               {result.url && (
@@ -172,10 +172,10 @@ export default function PushToGitHub({ repo, files, onClose }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-zinc-800 flex items-center justify-end gap-3">
+        <div className="px-5 py-4 border-t border-zinc-800 light:border-[#e5ded1] flex items-center justify-end gap-3">
           <button
             onClick={onClose}
-            className="text-zinc-400 hover:text-zinc-200 text-sm px-4 py-2"
+            className="text-zinc-400 hover:text-zinc-200 light:text-[#6b6255] light:hover:text-[#2b2620] text-sm px-4 py-2"
           >
             Cancel
           </button>

@@ -14,54 +14,54 @@ interface Props {
 // and the push_many handler in github/route.ts to handle null content entries.
 // Both are now implemented - see agentTools.ts executeTool delete_file handler.
 const ACTION_STYLES = {
-  create: { label: "CREATE", bg: "bg-teal-900", text: "text-teal-300", border: "border-teal-700" },
-  modify: { label: "MODIFY", bg: "bg-amber-900", text: "text-amber-300", border: "border-amber-700" },
-  delete: { label: "DELETE", bg: "bg-red-900",   text: "text-red-300",   border: "border-red-700"   },
+  create: { label: "CREATE", bg: "bg-teal-900 light:bg-teal-100", text: "text-teal-300 light:text-teal-800", border: "border-teal-700 light:border-teal-300" },
+  modify: { label: "MODIFY", bg: "bg-amber-900 light:bg-amber-100", text: "text-amber-300 light:text-amber-800", border: "border-amber-700 light:border-amber-300" },
+  delete: { label: "DELETE", bg: "bg-red-900 light:bg-red-100",   text: "text-red-300 light:text-red-800",   border: "border-red-700 light:border-red-300"   },
 };
 
 export default function PlanApproval({ plan, task, onApprove, onReject, executing }: Props) {
   return (
-    <div className="border-t border-zinc-800 bg-zinc-950 flex-shrink-0">
+    <div className="border-t border-zinc-800 light:border-[#e5ded1] bg-zinc-950 light:bg-[#faf8f4] flex-shrink-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1]">
         <div className="flex items-center gap-2">
           <span className="text-lg">📋</span>
           <div>
-            <p className="text-zinc-100 text-sm font-semibold">Agent Plan</p>
-            <p className="text-zinc-500 text-xs mt-0.5 max-w-lg truncate">"{task}"</p>
+            <p className="text-zinc-100 light:text-[#2b2620] text-sm font-semibold">Agent Plan</p>
+            <p className="text-zinc-500 light:text-[#8a7f6d] text-xs mt-0.5 max-w-lg truncate">"{task}"</p>
           </div>
         </div>
-        <span className="text-xs text-zinc-500 bg-zinc-800 border border-zinc-700 rounded-full px-2 py-0.5">
+        <span className="text-xs text-zinc-500 light:text-[#8a7f6d] bg-zinc-800 light:bg-[#efe9dd] border border-zinc-700 light:border-[#ddd3bd] rounded-full px-2 py-0.5">
           {plan.changes.length} file{plan.changes.length !== 1 ? "s" : ""} to change
         </span>
       </div>
 
       {/* Approach */}
-      <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-900">
-        <p className="text-zinc-400 text-xs uppercase tracking-wider mb-1">Approach</p>
-        <p className="text-zinc-200 text-sm">{plan.approach}</p>
+      <div className="px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1] bg-zinc-900 light:bg-white">
+        <p className="text-zinc-400 light:text-[#8a7f6d] text-xs uppercase tracking-wider mb-1">Approach</p>
+        <p className="text-zinc-200 light:text-[#2b2620] text-sm">{plan.approach}</p>
       </div>
 
       {/* Changes list */}
       <div className="px-4 py-3 max-h-64 overflow-y-auto">
-        <p className="text-zinc-400 text-xs uppercase tracking-wider mb-2">Planned changes</p>
+        <p className="text-zinc-400 light:text-[#8a7f6d] text-xs uppercase tracking-wider mb-2">Planned changes</p>
         <div className="space-y-2">
           {plan.changes.map((change, i) => {
             const style = ACTION_STYLES[change.action] ?? ACTION_STYLES.modify;
             return (
               <div
                 key={i}
-                className={`rounded-lg border ${style.border} bg-zinc-900 px-3 py-2.5`}
+                className={`rounded-lg border ${style.border} bg-zinc-900 light:bg-white px-3 py-2.5`}
               >
                 <div className="flex items-center gap-2 mb-1">
                   <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}>
                     {style.label}
                   </span>
-                  <span className="text-zinc-200 text-xs font-mono">{change.path}</span>
+                  <span className="text-zinc-200 light:text-[#2b2620] text-xs font-mono">{change.path}</span>
                 </div>
-                <p className="text-zinc-400 text-xs">{change.reason}</p>
+                <p className="text-zinc-400 light:text-[#6b6255] text-xs">{change.reason}</p>
                 {change.details && (
-                  <p className="text-zinc-500 text-xs mt-1 italic">{change.details}</p>
+                  <p className="text-zinc-500 light:text-[#8a7f6d] text-xs mt-1 italic">{change.details}</p>
                 )}
               </div>
             );
@@ -70,15 +70,15 @@ export default function PlanApproval({ plan, task, onApprove, onReject, executin
       </div>
 
       {/* Action buttons */}
-      <div className="px-4 py-3 border-t border-zinc-800 flex items-center justify-between">
-        <p className="text-zinc-600 text-xs">
+      <div className="px-4 py-3 border-t border-zinc-800 light:border-[#e5ded1] flex items-center justify-between">
+        <p className="text-zinc-600 light:text-[#a89e8c] text-xs">
           Approving will write these files. You'll review the actual code before pushing.
         </p>
         <div className="flex items-center gap-3">
           <button
             onClick={onReject}
             disabled={executing}
-            className="text-zinc-400 hover:text-zinc-200 text-sm px-4 py-2 transition-colors disabled:opacity-40"
+            className="text-zinc-400 hover:text-zinc-200 light:text-[#6b6255] light:hover:text-[#2b2620] text-sm px-4 py-2 transition-colors disabled:opacity-40"
           >
             ✗ Reject
           </button>

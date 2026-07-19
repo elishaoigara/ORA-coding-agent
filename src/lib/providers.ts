@@ -28,12 +28,30 @@ export interface PublicProvider {
 }
 
 // ── Deprecated model remapping ────────────────────────────────────────────────
+// NOTE (bug fix): this map is intentionally scoped to the NATIVE provider
+// namespace. "deepseek-reasoner" is deprecated in favour of the same model
+// that powers "deepseek-chat" (labelled "DeepSeek V4 Flash" in the UI).
+// Earlier revisions mapped straight to an OpenRouter-style slug
+// ("deepseek/deepseek-chat:free") regardless of provider, which meant a
+// request to DeepSeek's own API (api.deepseek.com) was sent an id it has
+// never heard of. Model ids are namespaced per-provider, so the remap target
+// must be too.
 const DEPRECATED_MODEL_MAP: Record<string, string> = {
-  "deepseek-reasoner": "deepseek/deepseek-chat:free",
-  "deepseek-chat": "deepseek/deepseek-chat:free",
+  "deepseek-reasoner": "deepseek-chat",
 };
 
-export function resolveModel(modelId: string): string {
+// Aliases that only apply when the request is actually going to OpenRouter
+// (kept for backward compatibility with older saved conversations that
+// stored a bare, non-namespaced model id together with provider "openrouter").
+const OPENROUTER_MODEL_ALIASES: Record<string, string> = {
+  "deepseek-chat": "deepseek/deepseek-chat:free",
+  "deepseek-reasoner": "deepseek/deepseek-chat:free",
+};
+
+export function resolveModel(modelId: string, providerId?: ProviderId): string {
+  if (providerId === "openrouter" && OPENROUTER_MODEL_ALIASES[modelId]) {
+    return OPENROUTER_MODEL_ALIASES[modelId];
+  }
   return DEPRECATED_MODEL_MAP[modelId] ?? modelId;
 }
 
@@ -148,6 +166,13 @@ export function getAllPublicProviders(): PublicProvider[] {
     });
   }
   return result;
+}
+
+/** Returns just the ids of providers that currently have a valid API key configured. */
+export function getConfiguredProviderIds(): RealProviderId[] {
+  return getAllPublicProviders()
+    .filter((p) => p.configured)
+    .map((p) => p.id as RealProviderId);
 }
 
 export function getAutoProvider(): ProviderConfig {

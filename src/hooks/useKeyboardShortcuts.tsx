@@ -9,6 +9,7 @@ export interface ShortcutHandlers {
   onToggleHistory:() => void;  // ⌘+H
   onToggleGitHub: () => void;  // ⌘+G
   onShowHelp:     () => void;  // ⌘+?
+  onToggleTheme?: () => void;  // ⌘+L
 }
 
 /**
@@ -75,13 +76,21 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
           handlers.onShowHelp();
           break;
 
+        case "l":
+        case "L":
+          if (inInput) break;
+          if (!handlers.onToggleTheme) break;
+          e.preventDefault();
+          handlers.onToggleTheme();
+          break;
+
         default:
           break;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [handlers.onSend, handlers.onNewChat, handlers.onToggleAgent,
-     handlers.onToggleHistory, handlers.onToggleGitHub, handlers.onShowHelp]
+     handlers.onToggleHistory, handlers.onToggleGitHub, handlers.onShowHelp, handlers.onToggleTheme]
   );
 
   useEffect(() => {
@@ -101,6 +110,7 @@ export const SHORTCUTS = [
   { keys: `${MOD}+/`,     description: "Toggle agent mode" },
   { keys: `${MOD}+H`,     description: "Toggle history panel" },
   { keys: `${MOD}+G`,     description: "Toggle GitHub sidebar" },
+  { keys: `${MOD}+L`,     description: "Toggle light / dark theme" },
   { keys: `${MOD}+?`,     description: "Show / hide this help" },
 ] as const;
 
@@ -127,14 +137,14 @@ export function ShortcutHelpModal({ open, onClose }: HelpModalProps) {
       onClick={onClose}
     >
       <div
-        className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 min-w-64 shadow-2xl"
+        className="bg-zinc-900 light:bg-white border border-zinc-700 light:border-[#e5ded1] rounded-xl p-6 min-w-64 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-zinc-200 text-sm font-medium">Keyboard shortcuts</h2>
+          <h2 className="text-zinc-200 light:text-[#2b2620] text-sm font-medium">Keyboard shortcuts</h2>
           <button
             onClick={onClose}
-            className="text-zinc-600 hover:text-zinc-400 text-xs"
+            className="text-zinc-600 hover:text-zinc-400 light:text-[#a89e8c] light:hover:text-[#6b6255] text-xs"
           >
             Esc
           </button>
@@ -143,13 +153,13 @@ export function ShortcutHelpModal({ open, onClose }: HelpModalProps) {
         <table className="w-full text-xs">
           <tbody>
             {SHORTCUTS.map(({ keys, description }) => (
-              <tr key={keys} className="border-b border-zinc-800 last:border-0">
+              <tr key={keys} className="border-b border-zinc-800 light:border-[#e5ded1] last:border-0">
                 <td className="py-2 pr-6">
-                  <kbd className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 font-mono text-zinc-300">
+                  <kbd className="bg-zinc-800 light:bg-[#efe9dd] border border-zinc-700 light:border-[#ddd3bd] rounded px-1.5 py-0.5 font-mono text-zinc-300 light:text-[#4a4335]">
                     {keys}
                   </kbd>
                 </td>
-                <td className="py-2 text-zinc-400">{description}</td>
+                <td className="py-2 text-zinc-400 light:text-[#6b6255]">{description}</td>
               </tr>
             ))}
           </tbody>

@@ -1,21 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProvider, resolveModel } from "@/lib/providers";
+import { getProvider, getConfiguredProviderIds, resolveModel, type ProviderId } from "@/lib/providers";
+import { routeMessage } from "@/lib/autoRouter";
+import { chatRequestSchema, validateOr400 } from "@/lib/validation";
 
 export const maxDuration = 120;
 
-export async function POST(req: NextRequest) {
-  let body: {
-    messages: { role: string; content: string }[];
-    model?: string;
-    provider?: string;
-    injectedFiles?: { path: string; content: string }[];
-  };
+// HTTP header values must be byte-strings (Latin-1) — the Headers API throws
+// if given e.g. a "→" character, which would turn a *successful* auto-routed
+// response into a 500. Belt-and-suspenders: strip anything outside printable
+// ASCII before it ever reaches a header, regardless of what routeMessage()
+// returns.
+function asciiSafe(s: string): string {
+  return s.replace(/[^\x20-\x7E]/g, "");
+}
 
+export async function POST(req: NextRequest) {
+  let raw: unknown;
   try {
-    body = await req.json();
+    raw = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
+
+  const parsed = validateOr400(chatRequestSchema, raw);
+  if (parsed instanceof NextResponse) return parsed;
+  const { messages: rawMessages, model, provider: providerId, injectedFiles } = parsed;
 
   // ── Password check (optional) ──────────────────────────────────────────
   const password = req.headers.get("x-app-password") ?? "";
@@ -24,21 +33,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { messages: rawMessages, model, provider: providerId, injectedFiles } = body;
-  if (!rawMessages?.length) {
-    return NextResponse.json({ error: "No messages" }, { status: 400 });
-  }
-
-  // ── Resolve provider & model ───────────────────────────────────────────
+  // ── Resolve provider & model ────────────────────────────────────────────
+  // Bug fix: "auto" used to fall through to getProvider("auto"), which
+  // returns an empty placeholder ({ baseUrl: "", apiKey: "" }) rather than a
+  // real provider — routeMessage() was defined in lib/autoRouter.ts but was
+  // never actually called from here. That meant every request sent with the
+  // default provider ("auto" is the app's default) tried to fetch a
+  // *relative* URL ("/chat/completions") from the server, which Node's
+  // fetch cannot resolve and throws on immediately — i.e. Auto mode was
+  // completely non-functional out of the box. Fixed by actually invoking
+  // the router and resolving it to a real, configured provider below.
   let provider;
+  let routeInfo: { provider: string; model: string; reason: string } | null = null;
+
   try {
-    provider = getProvider(providerId);
+    if (!providerId || providerId === "auto") {
+      const configured = getConfiguredProviderIds();
+      const lastUserText =
+        [...rawMessages].reverse().find((m) => m.role === "user")?.content ?? "";
+      const decision = routeMessage(String(lastUserText ?? ""), configured);
+      provider = getProvider(decision.provider);
+      const routedModel = resolveModel(decision.model || provider.defaultModel, provider.id);
+      routeInfo = { provider: decision.provider, model: routedModel, reason: decision.reason };
+    } else {
+      provider = getProvider(providerId);
+    }
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }
 
-  // Resolve deprecated model IDs
-  const resolvedModel = resolveModel(model || provider.defaultModel);
+  const resolvedModel = routeInfo?.model ?? resolveModel(model || provider.defaultModel, provider.id as ProviderId);
 
   // ── Build messages ─────────────────────────────────────────────────────
   const messages = [...rawMessages];
@@ -139,6 +163,16 @@ export async function POST(req: NextRequest) {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
+      // Bug fix: the frontend has always read these three headers to show
+      // the "routed to X" badge in Auto mode — they were simply never set
+      // server-side, so the badge silently never appeared.
+      ...(routeInfo
+        ? {
+            "X-Routed-Provider": asciiSafe(routeInfo.provider),
+            "X-Routed-Model": asciiSafe(routeInfo.model),
+            "X-Route-Reason": asciiSafe(routeInfo.reason),
+          }
+        : {}),
     },
   });
 }

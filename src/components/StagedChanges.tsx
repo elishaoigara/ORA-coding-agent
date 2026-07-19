@@ -171,17 +171,17 @@ function FileDiff({ file, selected, onToggleSelect, onOpenArtifact }: {
 
   return (
     <div className={`border rounded-lg overflow-hidden transition-colors ${
-      selected ? "border-violet-700/60" : "border-zinc-700"
+      selected ? "border-violet-700/60" : "border-zinc-700 light:border-[#ddd3bd]"
     }`}>
       {/* File header */}
-      <div className="flex items-center gap-2 px-3 py-2.5 bg-zinc-800 hover:bg-zinc-750">
+      <div className="flex items-center gap-2 px-3 py-2.5 bg-zinc-800 light:bg-[#efe9dd] hover:bg-zinc-750 light:hover:bg-[#e5ded1]">
         {/* Checkbox for per-file selection */}
         <button
           onClick={(e) => { e.stopPropagation(); onToggleSelect(); }}
           className={`flex-shrink-0 w-4 h-4 rounded border transition-colors ${
             selected
               ? "bg-violet-600 border-violet-500"
-              : "border-zinc-600 hover:border-zinc-400"
+              : "border-zinc-600 hover:border-zinc-400 light:border-[#c7bda8] light:hover:border-[#a89e8c]"
           } flex items-center justify-center`}
           aria-label={selected ? "Deselect file" : "Select file"}
         >
@@ -197,16 +197,16 @@ function FileDiff({ file, selected, onToggleSelect, onOpenArtifact }: {
           onClick={() => setExpanded((e) => !e)}
         >
           <span className={`text-xs font-medium px-1.5 py-0.5 rounded flex-shrink-0 ${
-            isDelete ? "bg-red-900 text-red-300" : isNew ? "bg-teal-900 text-teal-300" : "bg-amber-900 text-amber-300"
+            isDelete ? "bg-red-900 light:bg-red-100 text-red-300 light:text-red-700" : isNew ? "bg-teal-900 light:bg-teal-100 text-teal-300 light:text-teal-700" : "bg-amber-900 light:bg-amber-100 text-amber-300 light:text-amber-700"
           }`}>
             {isDelete ? "DEL" : isNew ? "NEW" : "MOD"}
           </span>
-          <span className="text-zinc-200 text-xs font-mono truncate">{file.path}</span>
+          <span className="text-zinc-200 light:text-[#2b2620] text-xs font-mono truncate">{file.path}</span>
         </button>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          {!isDelete && <span className="text-teal-400 text-xs">+{addedLines}</span>}
-          {removedLines > 0 && <span className="text-red-400 text-xs">-{removedLines}</span>}
+          {!isDelete && <span className="text-teal-400 light:text-teal-700 text-xs">+{addedLines}</span>}
+          {removedLines > 0 && <span className="text-red-400 light:text-red-600 text-xs">-{removedLines}</span>}
           {onOpenArtifact && !isDelete && (
             <button
               onClick={(e) => {
@@ -214,36 +214,36 @@ function FileDiff({ file, selected, onToggleSelect, onOpenArtifact }: {
                 onOpenArtifact(langFromPath(file.path), file.content ?? "", file.path);
               }}
               title="Open full file in split view"
-              className="flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-teal-300 hover:bg-zinc-700 transition-colors"
+              className="flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-teal-300 hover:bg-zinc-700 light:text-[#8a7f6d] light:hover:text-teal-700 light:hover:bg-[#e5ded1] transition-colors"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6v6M20 4L10 14" />
               </svg>
             </button>
           )}
-          <span className="text-zinc-600 text-xs select-none">{expanded ? "▲" : "▼"}</span>
+          <span className="text-zinc-600 light:text-[#a89e8c] text-xs select-none">{expanded ? "▲" : "▼"}</span>
         </div>
       </div>
 
       {/* Description */}
-      <div className="px-4 py-2 bg-zinc-850 border-b border-zinc-700/60">
-        <p className="text-zinc-400 text-xs">{file.description}</p>
+      <div className="px-4 py-2 bg-zinc-850 light:bg-[#f1ede4] border-b border-zinc-700/60 light:border-[#ddd3bd]">
+        <p className="text-zinc-400 light:text-[#6b6255] text-xs">{file.description}</p>
       </div>
 
       {/* Diff / full content */}
       {expanded && (
         <>
           {diff && !isDelete && (
-            <div className="flex gap-2 px-4 py-2 bg-zinc-900 border-b border-zinc-700/60">
+            <div className="flex gap-2 px-4 py-2 bg-zinc-900 light:bg-white border-b border-zinc-700/60 light:border-[#ddd3bd]">
               <button
                 onClick={() => setView("diff")}
-                className={`text-xs px-2 py-0.5 rounded transition-colors ${view === "diff" ? "bg-zinc-700 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+                className={`text-xs px-2 py-0.5 rounded transition-colors ${view === "diff" ? "bg-zinc-700 text-zinc-200 light:bg-[#ddd3bd] light:text-[#2b2620]" : "text-zinc-500 hover:text-zinc-300 light:text-[#8a7f6d] light:hover:text-[#2b2620]"}`}
               >
                 Diff
               </button>
               <button
                 onClick={() => setView("full")}
-                className={`text-xs px-2 py-0.5 rounded transition-colors ${view === "full" ? "bg-zinc-700 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+                className={`text-xs px-2 py-0.5 rounded transition-colors ${view === "full" ? "bg-zinc-700 text-zinc-200 light:bg-[#ddd3bd] light:text-[#2b2620]" : "text-zinc-500 hover:text-zinc-300 light:text-[#8a7f6d] light:hover:text-[#2b2620]"}`}
               >
                 Full file
               </button>
@@ -252,7 +252,7 @@ function FileDiff({ file, selected, onToggleSelect, onOpenArtifact }: {
 
           <div className="max-h-72 overflow-y-auto font-mono text-xs">
             {isDelete ? (
-              <div className="px-4 py-3 text-red-400 text-xs">File marked for deletion</div>
+              <div className="px-4 py-3 text-red-400 light:text-red-600 text-xs">File marked for deletion</div>
             ) : view === "diff" && contextLines ? (
               <div>
                 {contextLines.map((line, i) => (
@@ -260,12 +260,12 @@ function FileDiff({ file, selected, onToggleSelect, onOpenArtifact }: {
                     key={i}
                     className={`flex gap-3 px-3 py-px whitespace-pre-wrap ${
                       line.type === "add"
-                        ? "bg-teal-950 text-teal-300"
+                        ? "bg-teal-950 light:bg-teal-50 text-teal-300 light:text-teal-800"
                         : line.type === "remove"
-                        ? "bg-red-950 text-red-400"
+                        ? "bg-red-950 light:bg-red-50 text-red-400 light:text-red-700"
                         : line.text === "⋯"
-                        ? "text-zinc-600 bg-zinc-900/50"
-                        : "text-zinc-500"
+                        ? "text-zinc-600 light:text-[#a89e8c] bg-zinc-900/50 light:bg-[#f1ede4]"
+                        : "text-zinc-500 light:text-[#8a7f6d]"
                     }`}
                   >
                     <span className="select-none opacity-50 w-3 flex-shrink-0">
@@ -278,11 +278,11 @@ function FileDiff({ file, selected, onToggleSelect, onOpenArtifact }: {
                   </div>
                 ))}
                 {(!diff || diff.every((l) => l.type === "same")) && (
-                  <div className="px-4 py-3 text-zinc-600 text-xs">No changes detected</div>
+                  <div className="px-4 py-3 text-zinc-600 light:text-[#a89e8c] text-xs">No changes detected</div>
                 )}
               </div>
             ) : (
-              <pre className="px-4 py-3 text-zinc-300 whitespace-pre-wrap">{file.content}</pre>
+              <pre className="px-4 py-3 text-zinc-300 light:text-[#4a4335] whitespace-pre-wrap">{file.content}</pre>
             )}
           </div>
         </>
@@ -361,16 +361,16 @@ export default function StagedChanges({ files, repo, onPush, onDiscard, onOpenAr
   }
 
   return (
-    <div className="border-t border-zinc-800 bg-zinc-950">
+    <div className="border-t border-zinc-800 light:border-[#e5ded1] bg-zinc-950 light:bg-[#faf8f4]">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1]">
         <div className="flex items-center gap-2">
           <span className="text-amber-400 text-sm">⚡</span>
-          <span className="text-zinc-200 text-sm font-medium">
+          <span className="text-zinc-200 light:text-[#2b2620] text-sm font-medium">
             {files.length} file{files.length !== 1 ? "s" : ""} staged
           </span>
           {selectedPaths.size < files.length && (
-            <span className="text-violet-400 text-xs">
+            <span className="text-violet-400 light:text-violet-700 text-xs">
               ({selectedPaths.size} selected)
             </span>
           )}
@@ -379,13 +379,13 @@ export default function StagedChanges({ files, repo, onPush, onDiscard, onOpenAr
           {/* Select all toggle */}
           <button
             onClick={toggleAll}
-            className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
+            className="text-zinc-500 hover:text-zinc-300 light:text-[#8a7f6d] light:hover:text-[#2b2620] text-xs transition-colors"
           >
             {allSelected ? "Deselect all" : "Select all"}
           </button>
           <button
             onClick={onDiscard}
-            className="text-zinc-600 hover:text-red-400 text-xs transition-colors"
+            className="text-zinc-600 hover:text-red-400 light:text-[#a89e8c] light:hover:text-red-600 text-xs transition-colors"
           >
             Discard all
           </button>
@@ -407,18 +407,18 @@ export default function StagedChanges({ files, repo, onPush, onDiscard, onOpenAr
 
       {/* Push controls */}
       {!pushResult?.success && (
-        <div className="px-3 py-3 border-t border-zinc-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 flex-wrap">
+        <div className="px-3 py-3 border-t border-zinc-800 light:border-[#e5ded1] flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 flex-wrap">
           <input
             value={commitMsg}
             onChange={(e) => setCommitMsg(e.target.value)}
             placeholder="Commit message"
-            className="flex-1 min-w-48 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 text-xs focus:outline-none focus:border-teal-600"
+            className="flex-1 min-w-48 bg-zinc-800 light:bg-white border border-zinc-700 light:border-[#ddd3bd] rounded-lg px-3 py-2 text-zinc-100 light:text-[#2b2620] text-xs focus:outline-none focus:border-teal-600"
           />
           <input
             value={branch}
             onChange={(e) => setBranch(e.target.value)}
             placeholder="Branch (empty = default)"
-            className="w-44 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 text-xs focus:outline-none focus:border-teal-600 placeholder:text-zinc-600"
+            className="w-44 bg-zinc-800 light:bg-white border border-zinc-700 light:border-[#ddd3bd] rounded-lg px-3 py-2 text-zinc-100 light:text-[#2b2620] text-xs focus:outline-none focus:border-teal-600 placeholder:text-zinc-600 light:placeholder:text-[#a89e8c]"
           />
           <button
             onClick={handlePush}
@@ -436,8 +436,8 @@ export default function StagedChanges({ files, repo, onPush, onDiscard, onOpenAr
       {pushResult && (
         <div className={`mx-4 mb-3 rounded-lg px-4 py-3 text-xs ${
           pushResult.success
-            ? "bg-teal-950 border border-teal-800 text-teal-300"
-            : "bg-red-950 border border-red-800 text-red-300"
+            ? "bg-teal-950 light:bg-teal-50 border border-teal-800 light:border-teal-300 text-teal-300 light:text-teal-800"
+            : "bg-red-950 light:bg-red-50 border border-red-800 light:border-red-300 text-red-300 light:text-red-700"
         }`}>
           {pushResult.message}
           {pushResult.url && (

@@ -67,24 +67,24 @@ export default function ArtifactPanel({ artifact, onClose }: Props) {
   const lineCount = artifact.content.split("\n").length;
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950 border-l border-zinc-800 w-full md:w-[46%] lg:w-[42%] flex-shrink-0 animate-slide-in">
+    <div className="flex flex-col h-full bg-zinc-950 light:bg-white border-l border-zinc-800 light:border-[#e5ded1] w-full md:w-[46%] lg:w-[42%] flex-shrink-0 animate-slide-in">
       {/* Header */}
-      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-zinc-800 bg-zinc-900 flex-shrink-0">
+      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1] bg-zinc-900 light:bg-[#faf8f4] flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <span className="flex gap-1.5 flex-shrink-0">
-            <span className="w-2.5 h-2.5 rounded-full bg-zinc-700" />
-            <span className="w-2.5 h-2.5 rounded-full bg-zinc-700" />
-            <span className="w-2.5 h-2.5 rounded-full bg-zinc-700" />
+            <span className="w-2.5 h-2.5 rounded-full bg-zinc-700 light:bg-[#ddd3bd]" />
+            <span className="w-2.5 h-2.5 rounded-full bg-zinc-700 light:bg-[#ddd3bd]" />
+            <span className="w-2.5 h-2.5 rounded-full bg-zinc-700 light:bg-[#ddd3bd]" />
           </span>
-          <span className="text-zinc-100 text-sm font-mono truncate">{filename}</span>
-          <span className="text-zinc-600 text-xs flex-shrink-0">{lineCount} lines</span>
+          <span className="text-zinc-100 light:text-[#2b2620] text-sm font-mono truncate">{filename}</span>
+          <span className="text-zinc-600 light:text-[#a89e8c] text-xs flex-shrink-0">{lineCount} lines</span>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
             onClick={handleCopy}
             title="Copy code"
             className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors ${
-              copied ? "text-teal-400 bg-teal-900/30" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
+              copied ? "text-teal-400 bg-teal-900/30 light:text-teal-700 light:bg-teal-50" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 light:text-[#6b6255] light:hover:text-[#2b2620] light:hover:bg-[#efe9dd]"
             }`}
           >
             {copied ? (
@@ -107,7 +107,7 @@ export default function ArtifactPanel({ artifact, onClose }: Props) {
           <button
             onClick={handleDownload}
             title="Download file"
-            className="flex items-center justify-center w-8 h-8 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+            className="flex items-center justify-center w-8 h-8 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 light:text-[#6b6255] light:hover:text-[#2b2620] light:hover:bg-[#efe9dd] transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
@@ -116,7 +116,7 @@ export default function ArtifactPanel({ artifact, onClose }: Props) {
           <button
             onClick={onClose}
             title="Close"
-            className="flex items-center justify-center w-8 h-8 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+            className="flex items-center justify-center w-8 h-8 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 light:text-[#6b6255] light:hover:text-[#2b2620] light:hover:bg-[#efe9dd] transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -125,7 +125,10 @@ export default function ArtifactPanel({ artifact, onClose }: Props) {
         </div>
       </div>
 
-      {/* Code body */}
+      {/* Code body — intentionally always dark, like a terminal window embedded
+          in the page (consistent with the chat code blocks); this reads fine
+          regardless of the surrounding theme and avoids juggling a second
+          syntax-highlighter palette. */}
       <div className="flex-1 overflow-auto">
         <SyntaxHighlighter
           language={artifact.lang || "text"}
@@ -145,8 +148,8 @@ export default function ArtifactPanel({ artifact, onClose }: Props) {
       </div>
 
       {/* Footer hint */}
-      <div className="px-4 py-2 border-t border-zinc-800 bg-zinc-900 flex-shrink-0">
-        <p className="text-[11px] text-zinc-600">Copy this into VS Code, or download it directly.</p>
+      <div className="px-4 py-2 border-t border-zinc-800 light:border-[#e5ded1] bg-zinc-900 light:bg-[#faf8f4] flex-shrink-0">
+        <p className="text-[11px] text-zinc-600 light:text-[#a89e8c]">Copy this into VS Code, or download it directly.</p>
       </div>
     </div>
   );

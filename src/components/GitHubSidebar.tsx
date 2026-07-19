@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { InjectedFile, GitHubContext } from "@/types";
+import { useDebouncedValue } from "@/lib/useDebounce";
 
 // ── TokenBar with configurable limit ──────────────────────────────────────────
 function TokenBar({ tokens, limit }: { tokens: number; limit?: number }) {
@@ -12,12 +13,12 @@ function TokenBar({ tokens, limit }: { tokens: number; limit?: number }) {
     pct > 70 ? "bg-amber-500" :
     pct > 40 ? "bg-teal-500" : "bg-violet-500";
   return (
-    <div className="px-4 py-2 border-t border-zinc-800">
-      <div className="flex justify-between text-xs text-zinc-500 mb-1">
+    <div className="px-4 py-2 border-t border-zinc-800 light:border-[#e5ded1]">
+      <div className="flex justify-between text-xs text-zinc-500 light:text-[#8a7f6d] mb-1">
         <span>Tokens</span>
         <span>{tokens.toLocaleString()} / {effectiveLimit.toLocaleString()} ({pct.toFixed(0)}%)</span>
       </div>
-      <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+      <div className="h-1.5 bg-zinc-800 light:bg-[#efe9dd] rounded-full overflow-hidden">
         <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
@@ -210,26 +211,32 @@ export default function GitHubSidebar({
     }
   }
 
+  // Bug fix: this effect used to depend on `repo` directly, which meant every
+  // keystroke while typing "owner/repo" fired a network request via
+  // browseDirectory(). Debouncing means it only fires once typing pauses —
+  // picking a repo from the list below is unaffected (still feels instant;
+  // the delay is imperceptible for a single click that sets the full value).
+  const debouncedRepo = useDebouncedValue(repo, 400);
   useEffect(() => {
-    if (repo) browseDirectory(currentDir);
-  }, [repo]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (debouncedRepo) browseDirectory(currentDir);
+  }, [debouncedRepo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="flex flex-col h-full bg-zinc-950">
+    <div className="flex flex-col h-full bg-zinc-950 light:bg-[#faf8f4]">
       {/* ── Repo picker ───────────────────────────────────────────────── */}
-      <div className="px-4 py-3 border-b border-zinc-800 space-y-2">
+      <div className="px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1] space-y-2">
         <div className="flex items-center gap-2">
-          <span className="text-teal-400 text-sm">⎇</span>
+          <span className="text-teal-400 light:text-teal-600 text-sm">⎇</span>
           <input
             value={repo}
             onChange={(e) => setRepo(e.target.value)}
             placeholder="owner/repo"
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 text-xs focus:outline-none focus:border-teal-600 placeholder:text-zinc-600"
+            className="flex-1 bg-zinc-800 light:bg-white border border-zinc-700 light:border-[#ddd3bd] rounded-lg px-3 py-2 text-zinc-100 light:text-[#2b2620] text-xs focus:outline-none focus:border-teal-600 placeholder:text-zinc-600 light:placeholder:text-[#a89e8c]"
           />
           {repo && (
             <button
               onClick={() => { setRepo(""); setCurrentPath([]); setListing([]); }}
-              className="text-zinc-500 hover:text-zinc-300 text-xs px-2 py-2"
+              className="text-zinc-500 hover:text-zinc-300 light:text-[#8a7f6d] light:hover:text-[#2b2620] text-xs px-2 py-2"
               title="Change repo"
             >
               ✕
@@ -244,11 +251,11 @@ export default function GitHubSidebar({
               value={repoSearch}
               onChange={(e) => setRepoSearch(e.target.value)}
               placeholder="Search your repos..."
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-300 text-xs placeholder:text-zinc-600 focus:outline-none focus:border-teal-600"
+              className="w-full bg-zinc-800 light:bg-white border border-zinc-700 light:border-[#ddd3bd] rounded-lg px-3 py-2 text-zinc-300 light:text-[#4a4335] text-xs placeholder:text-zinc-600 light:placeholder:text-[#a89e8c] focus:outline-none focus:border-teal-600"
             />
             <div className="mt-2 max-h-56 overflow-y-auto space-y-0.5 mobile-scroll">
               {reposLoading ? (
-                <div className="px-2 py-4 text-zinc-500 text-xs text-center">Loading repos...</div>
+                <div className="px-2 py-4 text-zinc-500 light:text-[#8a7f6d] text-xs text-center">Loading repos...</div>
               ) : (
                 (() => {
                   const filtered = repoSearch
@@ -259,7 +266,7 @@ export default function GitHubSidebar({
                     : repos;
                   if (filtered.length === 0) {
                     return (
-                      <div className="px-2 py-4 text-zinc-500 text-xs text-center">
+                      <div className="px-2 py-4 text-zinc-500 light:text-[#8a7f6d] text-xs text-center">
                         {repoSearch ? "No matching repos" : "No repos found"}
                       </div>
                     );
@@ -268,14 +275,14 @@ export default function GitHubSidebar({
                     <button
                       key={r.full_name}
                       onClick={() => setRepo(r.full_name)}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 transition-colors"
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-800 light:hover:bg-[#efe9dd] transition-colors"
                     >
                       <div className="flex items-center gap-2">
-                        <span className="text-zinc-500 text-xs">{r.private ? "🔒" : "📂"}</span>
-                        <span className="text-zinc-200 text-xs font-medium truncate">{r.name}</span>
+                        <span className="text-zinc-500 light:text-[#8a7f6d] text-xs">{r.private ? "🔒" : "📂"}</span>
+                        <span className="text-zinc-200 light:text-[#2b2620] text-xs font-medium truncate">{r.name}</span>
                       </div>
                       {r.description && (
-                        <p className="text-zinc-500 text-xs mt-0.5 truncate pl-5">{r.description}</p>
+                        <p className="text-zinc-500 light:text-[#8a7f6d] text-xs mt-0.5 truncate pl-5">{r.description}</p>
                       )}
                     </button>
                   ));
@@ -287,11 +294,11 @@ export default function GitHubSidebar({
       </div>
 
       {/* ── Tabs ──────────────────────────────────────────────────────── */}
-      <div className="flex border-b border-zinc-800">
+      <div className="flex border-b border-zinc-800 light:border-[#e5ded1]">
         <button
           onClick={() => setActiveTab("browse")}
           className={`flex-1 py-2 text-xs font-medium transition-colors ${
-            activeTab === "browse" ? "text-teal-400 border-b-2 border-teal-500" : "text-zinc-500 hover:text-zinc-300"
+            activeTab === "browse" ? "text-teal-400 light:text-teal-700 border-b-2 border-teal-500" : "text-zinc-500 hover:text-zinc-300 light:text-[#8a7f6d] light:hover:text-[#2b2620]"
           }`}
         >
           Browse
@@ -299,7 +306,7 @@ export default function GitHubSidebar({
         <button
           onClick={() => setActiveTab("pinned")}
           className={`flex-1 py-2 text-xs font-medium transition-colors ${
-            activeTab === "pinned" ? "text-teal-400 border-b-2 border-teal-500" : "text-zinc-500 hover:text-zinc-300"
+            activeTab === "pinned" ? "text-teal-400 light:text-teal-700 border-b-2 border-teal-500" : "text-zinc-500 hover:text-zinc-300 light:text-[#8a7f6d] light:hover:text-[#2b2620]"
           }`}
         >
           Pinned
@@ -313,20 +320,20 @@ export default function GitHubSidebar({
           <div className="flex items-center gap-1 px-2 pb-2 overflow-x-auto">
             <button
               onClick={() => { setCurrentPath([]); browseDirectory(""); }}
-              className="text-xs text-teal-500 hover:text-teal-400 whitespace-nowrap flex-shrink-0"
+              className="text-xs text-teal-500 hover:text-teal-400 light:text-teal-700 light:hover:text-teal-600 whitespace-nowrap flex-shrink-0"
             >
               /
             </button>
             {currentPath.map((part, i) => (
               <span key={i} className="flex items-center gap-1 whitespace-nowrap flex-shrink-0">
-                <span className="text-zinc-600">/</span>
+                <span className="text-zinc-600 light:text-[#a89e8c]">/</span>
                 <button
                   onClick={() => {
                     const newPath = currentPath.slice(0, i + 1);
                     setCurrentPath(newPath);
                     browseDirectory(newPath.join("/"));
                   }}
-                  className="text-xs text-zinc-400 hover:text-zinc-200"
+                  className="text-xs text-zinc-400 hover:text-zinc-200 light:text-[#6b6255] light:hover:text-[#2b2620]"
                 >
                   {part}
                 </button>
@@ -343,13 +350,13 @@ export default function GitHubSidebar({
               </div>
             </div>
           ) : listing.length === 0 ? (
-            <div className="text-center py-8 text-zinc-600 text-xs">
+            <div className="text-center py-8 text-zinc-600 light:text-[#a89e8c] text-xs">
               {repo ? "Empty directory" : "Enter a repo to browse"}
             </div>
           ) : (
             listing.map((item) => (
-              <div key={item.path} className="group flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-800 transition-colors text-xs">
-                <span className="text-zinc-500 flex-shrink-0">
+              <div key={item.path} className="group flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-800 light:hover:bg-[#efe9dd] transition-colors text-xs">
+                <span className="text-zinc-500 light:text-[#8a7f6d] flex-shrink-0">
                   {item.type === "dir" ? "📁" : "📄"}
                 </span>
                 <button
@@ -361,7 +368,7 @@ export default function GitHubSidebar({
                       injectFile(item.path);
                     }
                   }}
-                  className="flex-1 text-left text-zinc-300 hover:text-teal-300 truncate min-w-0"
+                  className="flex-1 text-left text-zinc-300 hover:text-teal-300 light:text-[#4a4335] light:hover:text-teal-700 truncate min-w-0"
                   title={item.path}
                 >
                   {item.name}
@@ -369,7 +376,7 @@ export default function GitHubSidebar({
                 {item.type === "file" && (
                   <button
                     onClick={() => injectFile(item.path)}
-                    className="opacity-0 group-hover:opacity-100 text-teal-500 hover:text-teal-400 text-xs px-1 transition-opacity"
+                    className="opacity-0 group-hover:opacity-100 text-teal-500 hover:text-teal-400 light:text-teal-600 light:hover:text-teal-700 text-xs px-1 transition-opacity"
                     title="Inject file"
                   >
                     +
@@ -393,7 +400,7 @@ export default function GitHubSidebar({
             <div className="px-2 pt-3 pb-1">
               <button
                 onClick={() => injectDir("")}
-                className="w-full text-center text-xs py-1.5 rounded-lg border border-dashed border-zinc-700 text-zinc-500 hover:text-teal-400 hover:border-teal-700 transition-colors"
+                className="w-full text-center text-xs py-1.5 rounded-lg border border-dashed border-zinc-700 light:border-[#ddd3bd] text-zinc-500 hover:text-teal-400 hover:border-teal-700 light:text-[#8a7f6d] light:hover:text-teal-700 light:hover:border-teal-400 transition-colors"
               >
                 Inject entire repo
               </button>
@@ -408,27 +415,27 @@ export default function GitHubSidebar({
           {/* TODO: Pinned files feature needs re-implementation.
               Currently persisted but not read by the injection flow.
               Will be re-enabled in a future update. */}
-          <div className="text-center py-8 text-zinc-600 text-xs">
+          <div className="text-center py-8 text-zinc-600 light:text-[#a89e8c] text-xs">
             Pinned files feature is pending re-implementation.
           </div>
           {pinnedFiles?.[repo]?.length ? (
             pinnedFiles[repo].map((fp) => (
-              <div key={fp} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-800 transition-colors text-xs">
-                <span className="text-zinc-500">📌</span>
-                <span className="flex-1 truncate text-zinc-400">{fp}</span>
+              <div key={fp} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-800 light:hover:bg-[#efe9dd] transition-colors text-xs">
+                <span className="text-zinc-500 light:text-[#8a7f6d]">📌</span>
+                <span className="flex-1 truncate text-zinc-400 light:text-[#6b6255]">{fp}</span>
                 <button
                   onClick={() => {
                     injectFile(fp);
                     onTogglePinnedFile?.(repo, fp);
                   }}
-                  className="text-teal-500 hover:text-teal-400 text-xs"
+                  className="text-teal-500 hover:text-teal-400 light:text-teal-600 light:hover:text-teal-700 text-xs"
                 >
                   +
                 </button>
               </div>
             ))
           ) : (
-            <div className="text-center py-8 text-zinc-600 text-xs">
+            <div className="text-center py-8 text-zinc-600 light:text-[#a89e8c] text-xs">
               Pin files from browse tab to quick-access them here
             </div>
           )}
@@ -437,30 +444,30 @@ export default function GitHubSidebar({
 
       {/* ── Error bar ─────────────────────────────────────────────────── */}
       {error && (
-        <div className="px-4 py-2 bg-red-950 border-t border-red-800">
+        <div className="px-4 py-2 bg-red-950 light:bg-red-50 border-t border-red-800 light:border-red-200">
           <div className="flex items-center justify-between">
-            <span className="text-red-400 text-xs">{error}</span>
-            <button onClick={() => setError("")} className="text-red-500 hover:text-red-400 text-xs">✕</button>
+            <span className="text-red-400 light:text-red-700 text-xs">{error}</span>
+            <button onClick={() => setError("")} className="text-red-500 hover:text-red-400 light:text-red-600 light:hover:text-red-700 text-xs">✕</button>
           </div>
         </div>
       )}
 
       {/* ── Loaded files list ─────────────────────────────────────────── */}
       {files.length > 0 && (
-        <div className="border-t border-zinc-800 max-h-40 overflow-y-auto">
+        <div className="border-t border-zinc-800 light:border-[#e5ded1] max-h-40 overflow-y-auto">
           <div className="px-4 py-2 flex items-center justify-between">
-            <span className="text-zinc-500 text-xs">{files.length} file{files.length !== 1 ? "s" : ""} injected</span>
-            <button onClick={clearFiles} className="text-red-500 hover:text-red-400 text-xs">Clear</button>
+            <span className="text-zinc-500 light:text-[#8a7f6d] text-xs">{files.length} file{files.length !== 1 ? "s" : ""} injected</span>
+            <button onClick={clearFiles} className="text-red-500 hover:text-red-400 light:text-red-600 light:hover:text-red-700 text-xs">Clear</button>
           </div>
           {files.map((f) => (
-            <div key={f.path} className="flex items-center gap-2 px-4 py-1.5 group text-xs hover:bg-zinc-800 transition-colors">
-              <span className="text-zinc-500 flex-shrink-0">📄</span>
-              <span className="flex-1 truncate text-zinc-400" title={f.path}>{f.path}</span>
+            <div key={f.path} className="flex items-center gap-2 px-4 py-1.5 group text-xs hover:bg-zinc-800 light:hover:bg-[#efe9dd] transition-colors">
+              <span className="text-zinc-500 light:text-[#8a7f6d] flex-shrink-0">📄</span>
+              <span className="flex-1 truncate text-zinc-400 light:text-[#6b6255]" title={f.path}>{f.path}</span>
               {onTogglePinnedFile && (
                 <button
                   onClick={() => onTogglePinnedFile(repo, f.path)}
                   className={`opacity-0 group-hover:opacity-100 text-xs transition-opacity ${
-                    pinnedFiles?.[repo]?.includes(f.path) ? "text-amber-400" : "text-zinc-600 hover:text-amber-400"
+                    pinnedFiles?.[repo]?.includes(f.path) ? "text-amber-400" : "text-zinc-600 hover:text-amber-400 light:text-[#a89e8c] light:hover:text-amber-500"
                   }`}
                   title="Toggle pin"
                 >

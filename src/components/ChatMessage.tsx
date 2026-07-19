@@ -14,6 +14,8 @@ interface Props {
   activeRepo?: string;
   onSaveSnippet?: (lang: string, code: string) => void;
   onOpenArtifact?: (lang: string, code: string, path?: string) => void;
+  /** Only passed for the most recent assistant message — regenerates that reply. */
+  onRegenerate?: () => void;
 }
 
 const EXT_BY_LANG: Record<string, string> = {
@@ -130,6 +132,26 @@ function CopyButton({
           <span>Copy</span>
         </>
       )}
+    </button>
+  );
+}
+
+// ── Regenerate button ─────────────────────────────────────────────────────────
+function RegenerateButton({ onClick }: { onClick: () => void }) {
+  const [spinning, setSpinning] = useState(false);
+  return (
+    <button
+      onClick={() => { setSpinning(true); onClick(); setTimeout(() => setSpinning(false), 600); }}
+      title="Regenerate response"
+      className="flex items-center gap-1 text-[11px] text-zinc-600 hover:text-zinc-300 light:text-[#a89e8c] light:hover:text-[#4a4335] transition-colors touch-target"
+    >
+      <svg
+        className={`w-3 h-3 ${spinning ? "animate-spin" : ""}`}
+        fill="none" stroke="currentColor" viewBox="0 0 24 24"
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+      </svg>
+      Regenerate
     </button>
   );
 }
@@ -259,19 +281,19 @@ function CodeBlock({
       <div className="relative my-3">
         <button
           onClick={() => onOpenArtifact(lang, code, filename)}
-          className="w-full flex items-center gap-3 rounded-xl border border-zinc-700/60 bg-zinc-800/60 hover:bg-zinc-800 hover:border-zinc-600 px-4 py-3 text-left transition-colors group"
+          className="w-full flex items-center gap-3 rounded-xl border border-zinc-700/60 light:border-[#ddd3bd] bg-zinc-800/60 light:bg-[#efe9dd] hover:bg-zinc-800 hover:border-zinc-600 light:hover:bg-[#e5ded1] light:hover:border-[#c7bda8] px-4 py-3 text-left transition-colors group"
         >
-          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-900 text-teal-400 flex-shrink-0">
+          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-zinc-900 light:bg-white text-teal-400 light:text-teal-600 flex-shrink-0">
             <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 2v6h6" />
             </svg>
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-zinc-100 text-sm font-mono truncate">{filename}</div>
-            <div className="text-zinc-500 text-xs">{lineCount} lines · click to view</div>
+            <div className="text-zinc-100 light:text-[#2b2620] text-sm font-mono truncate">{filename}</div>
+            <div className="text-zinc-500 light:text-[#8a7f6d] text-xs">{lineCount} lines · click to view</div>
           </div>
-          <svg className="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 flex-shrink-0 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-4 h-4 text-zinc-500 light:text-[#a89e8c] group-hover:text-zinc-300 light:group-hover:text-[#4a4335] flex-shrink-0 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
         </button>
@@ -404,14 +426,14 @@ function CodeBlock({
 // Improvement #5: better contrast for inline code pills
 function InlineCode({ children }: { children: React.ReactNode }) {
   return (
-    <code className="text-teal-300 bg-zinc-800 border border-teal-700/40 rounded px-1.5 py-0.5 text-[12px] font-mono">
+    <code className="text-teal-300 light:text-teal-700 bg-zinc-800 light:bg-teal-50 border border-teal-700/40 light:border-teal-300 rounded px-1.5 py-0.5 text-[12px] font-mono">
       {children}
     </code>
   );
 }
 
 // ── Main ChatMessage ──────────────────────────────────────────────────────────
-export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpenArtifact }: Props) {
+export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpenArtifact, onRegenerate }: Props) {
   const isUser   = message.role === "user";
   const isSystem = message.role === "system";
   const [hovered, setHovered] = useState(false);
@@ -420,7 +442,7 @@ export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpen
   if (isSystem) {
     return (
       <div className="flex justify-center py-1">
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2 text-xs text-zinc-500 italic max-w-lg text-center">
+        <div className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-[#e5ded1] rounded-lg px-4 py-2 text-xs text-zinc-500 light:text-[#8a7f6d] italic max-w-lg text-center">
           {message.content}
         </div>
       </div>
@@ -437,7 +459,7 @@ export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpen
       >
         {/* Avatar dot */}
         <div className={`flex-shrink-0 mt-1 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
-          isUser ? "bg-violet-700 text-violet-100" : "bg-zinc-700 text-zinc-300"
+          isUser ? "bg-violet-700 text-violet-100" : "bg-zinc-700 light:bg-[#ddd3bd] text-zinc-300 light:text-[#4a4335]"
         }`}>
           {isUser ? "Y" : "AI"}
         </div>
@@ -449,15 +471,15 @@ export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpen
               className={`rounded-2xl px-4 py-3 ${
                 isUser
                   // Improvement #2: violet tint for user messages instead of teal-800
-                  ? "bg-violet-950/50 border border-violet-800/40 text-violet-50 rounded-tr-sm"
-                  : "bg-zinc-800/80 border border-zinc-700/50 text-zinc-100 rounded-tl-sm"
+                  ? "bg-violet-950/50 light:bg-violet-50 border border-violet-800/40 light:border-violet-200 text-violet-50 light:text-violet-900 rounded-tr-sm"
+                  : "bg-zinc-800/80 light:bg-white border border-zinc-700/50 light:border-[#e5ded1] text-zinc-100 light:text-[#2b2620] rounded-tl-sm"
               }`}
             >
               {isUser ? (
                 // Improvement #4: 15px text, relaxed leading
                 <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{message.content}</p>
               ) : (
-                <div className="prose prose-invert max-w-none text-[15px] leading-relaxed prose-p:leading-relaxed prose-p:my-2 prose-headings:text-zinc-100 prose-headings:font-semibold prose-strong:text-zinc-100 prose-li:my-0.5">
+                <div className="prose prose-invert light:prose-slate max-w-none text-[15px] leading-relaxed prose-p:leading-relaxed prose-p:my-2 prose-headings:text-zinc-100 light:prose-headings:text-[#2b2620] prose-headings:font-semibold prose-strong:text-zinc-100 light:prose-strong:text-[#2b2620] prose-li:my-0.5">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
@@ -486,7 +508,7 @@ export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpen
                       table({ children }) {
                         return (
                           <div className="overflow-x-auto -mx-2 my-2">
-                            <table className="min-w-full text-sm border border-zinc-700 rounded-lg overflow-hidden">
+                            <table className="min-w-full text-sm border border-zinc-700 light:border-[#ddd3bd] rounded-lg overflow-hidden">
                               {children}
                             </table>
                           </div>
@@ -494,14 +516,14 @@ export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpen
                       },
                       th({ children }) {
                         return (
-                          <th className="px-3 py-2 bg-zinc-800 text-zinc-300 text-xs font-medium text-left border-b border-zinc-700">
+                          <th className="px-3 py-2 bg-zinc-800 light:bg-[#efe9dd] text-zinc-300 light:text-[#4a4335] text-xs font-medium text-left border-b border-zinc-700 light:border-[#ddd3bd]">
                             {children}
                           </th>
                         );
                       },
                       td({ children }) {
                         return (
-                          <td className="px-3 py-2 border-b border-zinc-800/60 text-zinc-300">
+                          <td className="px-3 py-2 border-b border-zinc-800/60 light:border-[#e5ded1] text-zinc-300 light:text-[#4a4335]">
                             {children}
                           </td>
                         );
@@ -522,15 +544,16 @@ export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpen
             </div>
           </div>
 
-          {/* Footer: timestamp + token info */}
-          <div className={`flex items-center gap-2 px-1 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
+          {/* Footer: timestamp + token info + regenerate */}
+          <div className={`flex items-center gap-3 px-1 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
             {/* Improvement #6: timestamp */}
             {(message as any).createdAt && (
-              <span className="text-[11px] text-zinc-600">
+              <span className="text-[11px] text-zinc-600 light:text-[#a89e8c]">
                 {formatTime((message as any).createdAt)}
               </span>
             )}
             {!isUser && <TokenBadge message={message} />}
+            {!isUser && onRegenerate && <RegenerateButton onClick={onRegenerate} />}
           </div>
         </div>
       </div>

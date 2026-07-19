@@ -9,6 +9,27 @@
   --color-danger: 239 68 68;
   --color-bg: 9 9 11;
   --color-surface: 24 24 27;
+
+  /* ── Theme tokens (dark = default) ──────────────────────────────────── */
+  --app-bg: #09090b;
+  --app-text: #e4e4e7;
+  --panel-bg: #18181b;
+  --panel-border: #27272a;
+  --scrollbar-thumb: #3f3f46;
+  --scrollbar-thumb-hover: #52525b;
+}
+
+/* Cream/grey light theme — toggled by adding class="light" to <html>.
+   Only the base surface tokens change here; most component colour is
+   handled additively via the `light:` Tailwind variant on individual
+   elements (see tailwind.config.ts). */
+.light {
+  --app-bg: #f8f5f0;
+  --app-text: #2b2620;
+  --panel-bg: #ffffff;
+  --panel-border: #e5ded1;
+  --scrollbar-thumb: #d8d0c0;
+  --scrollbar-thumb-hover: #c7bda8;
 }
 
 * {
@@ -19,10 +40,11 @@ html,
 body {
   height: 100%;
   height: 100dvh;
-  background: #09090b;
-  color: #e4e4e7;
+  background: var(--app-bg);
+  color: var(--app-text);
   overscroll-behavior: none;
   -webkit-text-size-adjust: 100%;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* iOS safe-area */
@@ -37,8 +59,8 @@ body {
 /* Scrollbar */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: #52525b; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
 /* Touch targets */
 .touch-target {
@@ -69,6 +91,9 @@ input, textarea, select {
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
+.light .mobile-overlay {
+  background: rgba(43, 38, 32, 0.25);
+}
 
 /* Bottom sheet */
 .bottom-sheet {
@@ -77,8 +102,8 @@ input, textarea, select {
   left: 0;
   right: 0;
   z-index: 50;
-  background: #18181b;
-  border-top: 1px solid #27272a;
+  background: var(--panel-bg);
+  border-top: 1px solid var(--panel-border);
   border-radius: 16px 16px 0 0;
   padding-bottom: env(safe-area-inset-bottom, 16px);
   max-height: 80vh;
@@ -95,8 +120,8 @@ input, textarea, select {
   z-index: 50;
   width: 85vw;
   max-width: 340px;
-  background: #18181b;
-  border-right: 1px solid #27272a;
+  background: var(--panel-bg);
+  border-right: 1px solid var(--panel-border);
   transform: translateX(-100%);
   transition: transform 0.25s cubic-bezier(0.4,0,0.2,1), visibility 0.25s;
   overflow-y: auto;
@@ -116,8 +141,8 @@ input, textarea, select {
   z-index: 50;
   width: 85vw;
   max-width: 340px;
-  background: #18181b;
-  border-left: 1px solid #27272a;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--panel-border);
   transform: translateX(100%);
   transition: transform 0.25s cubic-bezier(0.4,0,0.2,1), visibility 0.25s;
   overflow-y: auto;
@@ -173,6 +198,16 @@ input, textarea, select {
   border-color: #52525b;
   outline: none;
 }
+.light .model-pill {
+  background: #efe9dd;
+  border-color: #ddd3bd;
+  color: #6b6255;
+}
+.light .model-pill:hover, .light .model-pill:focus {
+  background: #e5ded1;
+  color: #2b2620;
+  border-color: #c7bda8;
+}
 
 /* Provider badge */
 .provider-badge {
@@ -205,6 +240,17 @@ input, textarea, select {
 .input-field:focus {
   outline: none;
   border-color: #6d28d9;
+}
+.light .input-field {
+  background: #ffffff;
+  border-color: #ddd3bd;
+  color: #2b2620;
+}
+.light .input-field::placeholder {
+  color: #a89e8c;
+}
+.light .input-field:focus {
+  border-color: #7c3aed;
 }
 
 /* Shimmer loading */
@@ -239,4 +285,14 @@ input, textarea, select {
 @keyframes progress-pulse {
   0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
+}
+
+/* ── Accessibility: respect prefers-reduced-motion ──────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
