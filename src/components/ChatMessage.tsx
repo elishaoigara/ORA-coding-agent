@@ -127,7 +127,7 @@ function CopyButton({
         <>
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012 2v1" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
           </svg>
           <span>Copy</span>
         </>
@@ -536,9 +536,12 @@ export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpen
               )}
             </div>
 
-            {/* Improvement #3: inline copy button — appears on hover, top-right corner */}
-            <div className={`absolute top-2 ${isUser ? "left-2" : "right-2"} transition-opacity duration-150 ${
-              hovered ? "opacity-100" : "opacity-0"
+            {/* Improvement #3: inline copy button — appears on hover, top-right corner.
+                Always visible below md: `hovered` is driven by mouse enter/leave, which
+                touch devices never fire, so a hover-only reveal would make this button
+                permanently invisible (though still technically tappable) on mobile. */}
+            <div className={`absolute top-2 ${isUser ? "left-2" : "right-2"} transition-opacity duration-150 opacity-100 md:opacity-0 ${
+              hovered ? "md:opacity-100" : ""
             }`}>
               <CopyButton text={message.content} iconOnly />
             </div>

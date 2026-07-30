@@ -28,7 +28,6 @@ function TokenBar({ tokens, limit }: { tokens: number; limit?: number }) {
 interface Props {
   onFilesChange: (files: InjectedFile[], repo: string) => void;
   savedContext?: GitHubContext;
-  onClose: () => void;
   pinnedFiles?: Record<string, string[]>;
   onTogglePinnedFile?: (repo: string, path: string) => void;
   contextWindow?: number;
@@ -37,7 +36,6 @@ interface Props {
 export default function GitHubSidebar({
   onFilesChange,
   savedContext,
-  onClose,
   pinnedFiles,
   onTogglePinnedFile,
   contextWindow,
@@ -50,7 +48,7 @@ export default function GitHubSidebar({
   const [files, setFiles]           = useState<InjectedFile[]>(savedContext?.files ?? []);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState("");
-  const [activeTab, setActiveTab]   = useState<"browse" | "snippets" | "pinned">("browse");
+  const [activeTab, setActiveTab]   = useState<"browse" | "pinned">("browse");
 
   // ── Token estimator ──────────────────────────────────────────────────
   function estimateTokens(files: InjectedFile[]): number {
@@ -376,7 +374,7 @@ export default function GitHubSidebar({
                 {item.type === "file" && (
                   <button
                     onClick={() => injectFile(item.path)}
-                    className="opacity-0 group-hover:opacity-100 text-teal-500 hover:text-teal-400 light:text-teal-600 light:hover:text-teal-700 text-xs px-1 transition-opacity"
+                    className="opacity-100 md:opacity-0 md:group-hover:opacity-100 text-teal-500 hover:text-teal-400 light:text-teal-600 light:hover:text-teal-700 text-xs px-1 transition-opacity"
                     title="Inject file"
                   >
                     +
@@ -385,7 +383,7 @@ export default function GitHubSidebar({
                 {item.type === "dir" && (
                   <button
                     onClick={() => injectDir(item.path)}
-                    className="opacity-0 group-hover:opacity-100 text-amber-500 hover:text-amber-400 text-xs px-1 transition-opacity"
+                    className="opacity-100 md:opacity-0 md:group-hover:opacity-100 text-amber-500 hover:text-amber-400 text-xs px-1 transition-opacity"
                     title="Inject all files in folder"
                   >
                     ⊞
@@ -412,12 +410,6 @@ export default function GitHubSidebar({
       {/* ── Pinned tab ────────────────────────────────────────────────── */}
       {activeTab === "pinned" && (
         <div className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5 mobile-scroll">
-          {/* TODO: Pinned files feature needs re-implementation.
-              Currently persisted but not read by the injection flow.
-              Will be re-enabled in a future update. */}
-          <div className="text-center py-8 text-zinc-600 light:text-[#a89e8c] text-xs">
-            Pinned files feature is pending re-implementation.
-          </div>
           {pinnedFiles?.[repo]?.length ? (
             pinnedFiles[repo].map((fp) => (
               <div key={fp} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-800 light:hover:bg-[#efe9dd] transition-colors text-xs">
@@ -466,7 +458,7 @@ export default function GitHubSidebar({
               {onTogglePinnedFile && (
                 <button
                   onClick={() => onTogglePinnedFile(repo, f.path)}
-                  className={`opacity-0 group-hover:opacity-100 text-xs transition-opacity ${
+                  className={`opacity-100 md:opacity-0 md:group-hover:opacity-100 text-xs transition-opacity ${
                     pinnedFiles?.[repo]?.includes(f.path) ? "text-amber-400" : "text-zinc-600 hover:text-amber-400 light:text-[#a89e8c] light:hover:text-amber-500"
                   }`}
                   title="Toggle pin"
@@ -476,7 +468,7 @@ export default function GitHubSidebar({
               )}
               <button
                 onClick={() => removeFile(f.path)}
-                className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-400 text-xs transition-opacity"
+                className="opacity-100 md:opacity-0 md:group-hover:opacity-100 text-red-500 hover:text-red-400 text-xs transition-opacity"
               >
                 ✕
               </button>

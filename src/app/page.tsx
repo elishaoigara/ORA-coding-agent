@@ -616,8 +616,12 @@ export default function Home() {
     <div className="flex h-dvh bg-zinc-950 light:bg-[#f8f5f0] overflow-hidden">
 
       {/* ── Backdrop ─────────────────────────────────────────────────────── */}
+      {/* md:hidden: on desktop the sidebars are permanently docked (md:visible)
+          and the model picker is a small anchored dropdown, so a full-screen
+          dimmed backdrop has nothing to justify and would otherwise cover the
+          whole app and swallow every click until manually dismissed. */}
       {(showHistory || showGitHub || showModelPicker) && (
-        <div className="mobile-overlay" onClick={closeAll} />
+        <div className="mobile-overlay md:hidden" onClick={closeAll} />
       )}
 
       {/* ── History sidebar ───────────────────────────────────────────────── */}
@@ -744,7 +748,7 @@ export default function Home() {
 
         {/* ── Model picker dropdown ─────────────────────────────────────── */}
         {showModelPicker && (
-          <div className="bottom-sheet md:absolute md:top-14 md:right-3 md:bottom-auto md:max-h-[500px] md:w-80 md:border md:border-zinc-700 light:md:border-[#e5ded1] md:rounded-xl md:shadow-2xl">
+          <div className="bottom-sheet md:absolute md:top-14 md:left-auto md:right-3 md:bottom-auto md:max-h-[500px] md:w-80 md:border md:border-zinc-700 light:md:border-[#e5ded1] md:rounded-xl md:shadow-2xl">
             <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1] sticky top-0 bg-zinc-900 light:bg-white z-10">
               <span className="text-zinc-100 light:text-[#2b2620] text-sm font-semibold">Model</span>
               <button onClick={() => setShowModelPicker(false)} className="touch-target text-zinc-500 hover:text-zinc-200 light:text-[#8a7f6d] light:hover:text-[#2b2620]">
@@ -1079,7 +1083,6 @@ export default function Home() {
             <GitHubSidebar
               onFilesChange={handleFilesChange}
               savedContext={active?.githubContext}
-              onClose={() => setShowGitHub(false)}
               pinnedFiles={pinnedFiles}
               onTogglePinnedFile={(repo, filePath) => {
                 setPinnedFiles((prev) => {
