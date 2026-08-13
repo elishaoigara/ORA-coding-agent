@@ -95,20 +95,34 @@ input, textarea, select {
   background: rgba(43, 38, 32, 0.25);
 }
 
-/* Bottom sheet */
-.bottom-sheet {
+/* Model selector: bottom sheet on phones, anchored popover inside the chat
+   column on desktop. The desktop positioning is defined here instead of with
+   responsive utility classes so the base fixed positioning cannot win the
+   cascade and place the panel over the GitHub sidebar. */
+.model-picker-panel {
   position: fixed;
+  right: 0;
   bottom: 0;
   left: 0;
-  right: 0;
-  z-index: 50;
-  background: var(--panel-bg);
-  border-top: 1px solid var(--panel-border);
+  z-index: 60;
+  max-height: min(80dvh, 680px);
   border-radius: 16px 16px 0 0;
-  padding-bottom: env(safe-area-inset-bottom, 16px);
-  max-height: 80vh;
-  overflow-y: auto;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   -webkit-overflow-scrolling: touch;
+}
+
+@media (min-width: 768px) {
+  .model-picker-panel {
+    position: absolute;
+    top: 3.75rem;
+    right: 0.75rem;
+    bottom: auto;
+    left: auto;
+    width: min(22rem, calc(100% - 1.5rem));
+    max-height: min(36rem, calc(100dvh - 5rem));
+    border-radius: 14px;
+    padding-bottom: 0;
+  }
 }
 
 /* Slide-in sidebars */

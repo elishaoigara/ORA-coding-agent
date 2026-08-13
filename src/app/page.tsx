@@ -70,6 +70,12 @@ async function responseError(response: Response, fallback: string): Promise<stri
   }
 }
 
+function formatContextWindow(tokens?: number): string | null {
+  if (!tokens) return null;
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 ? 1 : 0)}M ctx`;
+  return `${Math.round(tokens / 1_000)}K ctx`;
+}
+
 // Bug fix #9: SSR-safe localStorage helpers
 function lsGet(key: string, fallback: string): string {
   if (typeof window === "undefined") return fallback;
@@ -721,6 +727,27 @@ function Workspace() {
 
   useEffect(() => { closeAll(); }, [activeId, closeAll]);
 
+  useEffect(() => {
+    if (!showModelPicker) return;
+
+    const closeModelPicker = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest("[data-model-picker-panel], [data-model-picker-trigger]")) return;
+      setShowModelPicker(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowModelPicker(false);
+    };
+
+    document.addEventListener("pointerdown", closeModelPicker);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeModelPicker);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [showModelPicker]);
+
   // Bug fix #2: explicit isAgentBusy check
   const isAgentBusy   = agentPhase === "planning" || agentPhase === "executing";
   const inputDisabled = loading || isAgentBusy || (agentMode && !activeRepo) || agentPhase === "awaiting_approval";
@@ -780,7 +807,7 @@ function Workspace() {
       </div>
 
       {/* ── Main area ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="relative flex-1 flex flex-col min-w-0">
 
         {/* ── Top bar ───────────────────────────────────────────────────── */}
         <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 light:border-[#e5ded1] bg-zinc-900/90 light:bg-white/90 backdrop-blur-sm flex-shrink-0">
@@ -807,9 +834,13 @@ function Workspace() {
             <ThemeToggleButton />
 
             <button
-              onClick={() => setShowModelPicker((v) => !v)}
+              type="button"
+              data-model-picker-trigger
+              onClick={() => setShowModelPicker((visible) => !visible)}
               className="model-pill"
               aria-label="Select model"
+              aria-haspopup="dialog"
+              aria-expanded={showModelPicker}
               title={`${providerLabel} · ${modelLabel}`}
             >
               {/* On mobile show only provider to save space */}
@@ -894,14 +925,19 @@ function Workspace() {
 
         {/* ── Model picker dropdown ─────────────────────────────────────── */}
         {showModelPicker && (
-          <div className="bottom-sheet md:absolute md:top-14 md:left-auto md:right-3 md:bottom-auto md:max-h-[500px] md:w-80 md:border md:border-zinc-700 light:md:border-[#e5ded1] md:rounded-xl md:shadow-2xl">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1] sticky top-0 bg-zinc-900 light:bg-white z-10">
+          <div
+            data-model-picker-panel
+            role="dialog"
+            aria-label="Model and instructions"
+            className="model-picker-panel flex flex-col overflow-hidden border border-zinc-700 bg-zinc-900 shadow-2xl light:border-[#e5ded1] light:bg-white"
+          >
+            <div className="flex flex-shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-4 py-3 light:border-[#e5ded1] light:bg-white">
               <span className="text-zinc-100 light:text-[#2b2620] text-sm font-semibold">Model</span>
               <button onClick={() => setShowModelPicker(false)} className="touch-target text-zinc-500 hover:text-zinc-200 light:text-[#8a7f6d] light:hover:text-[#2b2620]">
                 <IconX />
               </button>
             </div>
-            <div className="p-3 space-y-1 overflow-y-auto">
+            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
               {/* Auto option */}
               <button
                 onClick={() => { handleProviderChange("auto"); setShowModelPicker(false); }}
@@ -921,10 +957,7 @@ function Workspace() {
                     {p.name} {!p.configured && <span className="text-zinc-700 light:text-[#c7bda8]">(not configured)</span>}
                   </div>
                   {p.models.map((m) => {
-                    // UI improvement #4: show context window from label
-                    const ctxMatch = m.label.match(/\(([^)]+ctx[^)]*)\)/i);
-                    const ctxHint  = ctxMatch ? ctxMatch[1] : null;
-                    const baseLabel = ctxMatch ? m.label.replace(/\s*\([^)]+ctx[^)]*\)/i, "").trim() : m.label;
+                    const contextHint = formatContextWindow(m.contextWindow);
                     return (
                       <button
                         key={m.id}
@@ -940,10 +973,12 @@ function Workspace() {
                             : "text-zinc-300 hover:bg-zinc-800 light:text-[#4a4335] light:hover:bg-[#efe9dd]"
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <span>{baseLabel}</span>
-                          {ctxHint && (
-                            <span className="text-zinc-600 light:text-[#a89e8c] text-xs flex-shrink-0">{ctxHint}</span>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="truncate">{m.label}</span>
+                          {contextHint && (
+                            <span className="flex-shrink-0 text-[11px] text-zinc-600 light:text-[#a89e8c]">
+                              {contextHint}
+                            </span>
                           )}
                         </div>
                       </button>
@@ -954,7 +989,7 @@ function Workspace() {
             </div>
 
             {/* System prompt section */}
-            <div className="px-4 pb-4 pt-2 border-t border-zinc-800 light:border-[#e5ded1]">
+            <div className="flex-shrink-0 border-t border-zinc-800 px-4 pb-4 pt-3 light:border-[#e5ded1]">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-zinc-500 light:text-[#8a7f6d] text-xs font-medium">System prompt</label>
                 <select
