@@ -27,32 +27,24 @@ export interface PublicProvider {
   models: ModelConfig[];
 }
 
-// ── Deprecated model remapping ────────────────────────────────────────────────
-// NOTE (bug fix): this map is intentionally scoped to the NATIVE provider
-// namespace. "deepseek-reasoner" is deprecated in favour of the same model
-// that powers "deepseek-chat" (labelled "DeepSeek V4 Flash" in the UI).
-// Earlier revisions mapped straight to an OpenRouter-style slug
-// ("deepseek/deepseek-chat:free") regardless of provider, which meant a
-// request to DeepSeek's own API (api.deepseek.com) was sent an id it has
-// never heard of. Model ids are namespaced per-provider, so the remap target
-// must be too.
-const DEPRECATED_MODEL_MAP: Record<string, string> = {
-  "deepseek-reasoner": "deepseek-chat",
+// DeepSeek retired the legacy deepseek-chat/deepseek-reasoner aliases on
+// 24 July 2026. Keep saved conversations working by resolving those aliases
+// inside the selected provider's namespace.
+const DEEPSEEK_MODEL_ALIASES: Record<string, string> = {
+  "deepseek-chat": "deepseek-v4-flash",
+  "deepseek-reasoner": "deepseek-v4-pro",
 };
 
-// Aliases that only apply when the request is actually going to OpenRouter
-// (kept for backward compatibility with older saved conversations that
-// stored a bare, non-namespaced model id together with provider "openrouter").
 const OPENROUTER_MODEL_ALIASES: Record<string, string> = {
-  "deepseek-chat": "deepseek/deepseek-chat:free",
-  "deepseek-reasoner": "deepseek/deepseek-chat:free",
+  "deepseek-chat": "deepseek/deepseek-v4-flash:free",
+  "deepseek-reasoner": "deepseek/deepseek-v4-flash:free",
+  "deepseek/deepseek-chat:free": "deepseek/deepseek-v4-flash:free",
 };
 
 export function resolveModel(modelId: string, providerId?: ProviderId): string {
-  if (providerId === "openrouter" && OPENROUTER_MODEL_ALIASES[modelId]) {
-    return OPENROUTER_MODEL_ALIASES[modelId];
-  }
-  return DEPRECATED_MODEL_MAP[modelId] ?? modelId;
+  if (providerId === "deepseek") return DEEPSEEK_MODEL_ALIASES[modelId] ?? modelId;
+  if (providerId === "openrouter") return OPENROUTER_MODEL_ALIASES[modelId] ?? modelId;
+  return modelId;
 }
 
 // ── Provider definitions ──────────────────────────────────────────────────────
@@ -63,21 +55,21 @@ const PROVIDERS: Record<RealProviderId, Omit<ProviderConfig, "apiKey">> = {
     id: "groq",
     name: "Groq",
     baseUrl: "https://api.groq.com/openai/v1",
-    defaultModel: "qwen-2.5-coder-32b",
+    defaultModel: "openai/gpt-oss-120b",
     models: [
-      { id: "qwen-2.5-coder-32b", label: "Qwen 2.5 Coder 32B", contextWindow: 128_000 },
-      { id: "deepseek-r1-distill-llama-70b", label: "DeepSeek R1 70B", contextWindow: 128_000 },
-      { id: "llama-3.3-70b-versatile", label: "LLaMA 3.3 70B", contextWindow: 128_000 },
+      { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B", contextWindow: 131_072 },
+      { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B", contextWindow: 131_072 },
+      { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B", contextWindow: 131_072 },
     ],
   },
   deepseek: {
     id: "deepseek",
     name: "DeepSeek",
     baseUrl: "https://api.deepseek.com/v1",
-    defaultModel: "deepseek-chat",
+    defaultModel: "deepseek-v4-flash",
     models: [
-      { id: "deepseek-chat", label: "DeepSeek V4 Flash", contextWindow: 1_000_000 },
-      { id: "deepseek-reasoner", label: "DeepSeek Reasoner (→ V4 Flash)" },
+      { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash", contextWindow: 1_000_000 },
+      { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", contextWindow: 1_000_000 },
     ],
   },
   qwen: {
@@ -86,10 +78,10 @@ const PROVIDERS: Record<RealProviderId, Omit<ProviderConfig, "apiKey">> = {
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     defaultModel: "qwen3-coder-plus",
     models: [
-      { id: "qwen3-coder-plus", label: "Qwen3 Coder Plus ★ (262K ctx)", contextWindow: 262_144 },
-      { id: "qwen3-coder-32b", label: "Qwen3 Coder 32B", contextWindow: 32_768 },
-      { id: "qwen3-max", label: "Qwen3 Max", contextWindow: 128_000 },
-      { id: "qwq-32b", label: "QWQ 32B (reasoning)", contextWindow: 32_768 },
+      { id: "qwen3-coder-plus", label: "Qwen3 Coder Plus", contextWindow: 1_000_000 },
+      { id: "qwen3-coder-next", label: "Qwen3 Coder Next", contextWindow: 262_144 },
+      { id: "qwen3-coder-flash", label: "Qwen3 Coder Flash", contextWindow: 1_000_000 },
+      { id: "qwen3-max", label: "Qwen3 Max", contextWindow: 262_144 },
     ],
   },
   openai: {
@@ -108,13 +100,9 @@ const PROVIDERS: Record<RealProviderId, Omit<ProviderConfig, "apiKey">> = {
     id: "openrouter",
     name: "OpenRouter",
     baseUrl: "https://openrouter.ai/api/v1",
-    defaultModel: "deepseek/deepseek-chat:free",
+    defaultModel: "deepseek/deepseek-v4-flash:free",
     models: [
-      { id: "deepseek/deepseek-chat:free", label: "DeepSeek V4 Flash ★ (1M ctx)", contextWindow: 1_000_000 },
-      { id: "deepseek/deepseek-r1:free", label: "DeepSeek R1 (reasoning)", contextWindow: 128_000 },
-      { id: "qwen/qwen3-coder-plus:free", label: "Qwen3 Coder Plus (262K ctx)", contextWindow: 262_144 },
-      { id: "qwen/qwen3-max:free", label: "Qwen3 Max", contextWindow: 128_000 },
-      { id: "google/gemini-2.0-flash-001:free", label: "Gemini 2.0 Flash", contextWindow: 1_000_000 },
+      { id: "deepseek/deepseek-v4-flash:free", label: "DeepSeek V4 Flash", contextWindow: 1_048_576 },
     ],
   },
 };

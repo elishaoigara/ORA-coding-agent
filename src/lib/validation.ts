@@ -40,34 +40,98 @@ export const chatRequestSchema = z.object({
 export type ChatRequest = z.infer<typeof chatRequestSchema>;
 
 // ── /api/agent ─────────────────────────────────────────────────────────────
-const agentPlanChangeSchema = z.object({
+const repositoryPathSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1000)
+  .refine(
+    (path) =>
+      !path.startsWith("/") &&
+      !path.includes("\0") &&
+      !path.split("/").includes(".."),
+    "Path must be relative and stay within the repository"
+  );
+
+export const agentPlanChangeSchema = z.object({
   action: z.enum(["create", "modify", "delete"]),
-  path: z.string().min(1),
-  reason: z.string().default(""),
-  details: z.string().default(""),
+  path: repositoryPathSchema,
+  reason: z.string().max(2000).default(""),
+  details: z.string().max(10_000).default(""),
 });
 
-const agentPlanSchema = z.object({
-  summary: z.string().default(""),
-  approach: z.string().default(""),
-  changes: z.array(agentPlanChangeSchema).default([]),
+export const agentPlanSchema = z.object({
+  summary: z.string().max(5000).default(""),
+  approach: z.string().max(20_000).default(""),
+  changes: z.array(agentPlanChangeSchema).min(1).max(100),
 });
 
-export const agentRequestSchema = z.object({
+const agentToolCallSchema = z
+  .object({
+    id: z.string().max(500).optional(),
+    type: z.literal("function").optional(),
+    function: z
+      .object({
+        name: z.string().max(200).optional(),
+        arguments: z.string().max(2_100_000).optional(),
+      })
+      .optional(),
+  })
+  .passthrough();
+
+const agentResumeMessageSchema = z
+  .object({
+    role: z.enum(["user", "assistant", "system", "tool"]),
+    content: z.union([z.string().max(2_100_000), z.null()]).optional(),
+    tool_calls: z.array(agentToolCallSchema).max(50).optional(),
+    tool_call_id: z.string().max(500).optional(),
+  })
+  .passthrough();
+
+const stagedFileSchema = z.object({
+  path: repositoryPathSchema,
+  content: z.union([z.string().max(2_000_000), z.null()]),
+  originalContent: z.union([z.string().max(2_000_000), z.null()]).default(null),
+  description: z.string().max(2000).default("Agent change"),
+  action: z.enum(["create", "modify", "delete"]),
+  sha: z.string().max(100).optional(),
+});
+
+export const branchSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(250)
+  .refine(
+    (branch) =>
+      !branch.startsWith("/") &&
+      !branch.endsWith("/") &&
+      !branch.endsWith(".lock") &&
+      !branch.includes("..") &&
+      !branch.includes("@{") &&
+      !/[\\~^:?*[\]\x00-\x20\x7f]/.test(branch),
+    "Invalid branch name"
+  );
+
+const agentRequestBase = {
   task: z.string().trim().min(1, "Task is required").max(20_000, "Task description is too long"),
   repo: repoSchema,
   provider: z.string().max(50).optional(),
   model: z.string().max(200).optional(),
-  phase: z.enum(["plan", "execute"]),
-  plan: agentPlanSchema.optional(),
-  resumeMessages: z.array(z.unknown()).max(500).optional(),
-  resumeStagedFiles: z.array(z.unknown()).max(500).optional(),
-});
+  branch: branchSchema.optional(),
+  resumeMessages: z.array(agentResumeMessageSchema).max(300).optional(),
+  resumeStagedFiles: z.array(stagedFileSchema).max(100).optional(),
+};
+
+export const agentRequestSchema = z.discriminatedUnion("phase", [
+  z.object({ ...agentRequestBase, phase: z.literal("plan") }),
+  z.object({ ...agentRequestBase, phase: z.literal("execute"), plan: agentPlanSchema }),
+]);
 export type AgentRequest = z.infer<typeof agentRequestSchema>;
 
 // ── /api/github ────────────────────────────────────────────────────────────
 const pushFileSchema = z.object({
-  path: z.string().min(1).max(1000),
+  path: repositoryPathSchema,
   content: z.union([z.string().max(5_000_000), z.null()]),
   action: z.enum(["create", "modify", "delete"]).optional(),
 });
@@ -77,7 +141,7 @@ export const githubRequestSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("create_branch"),
     repo: repoSchema,
-    branchName: z.string().trim().min(1, "branchName is required").max(250),
+    branchName: branchSchema,
   }),
   z.object({
     action: z.literal("list_files"),
@@ -94,7 +158,7 @@ export const githubRequestSchema = z.discriminatedUnion("action", [
     repo: repoSchema,
     files: z.array(pushFileSchema).min(1, "No files provided").max(200, "Too many files in one push"),
     message: z.string().max(2000).optional(),
-    branch: z.string().max(250).optional(),
+    branch: branchSchema.optional(),
   }),
 ]);
 export type GithubRequest = z.infer<typeof githubRequestSchema>;

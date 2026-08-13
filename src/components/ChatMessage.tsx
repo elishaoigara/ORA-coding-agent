@@ -14,6 +14,7 @@ interface Props {
   activeRepo?: string;
   onSaveSnippet?: (lang: string, code: string) => void;
   onOpenArtifact?: (lang: string, code: string, path?: string) => void;
+  routingBadge?: { provider: string; model: string; reason: string };
   /** Only passed for the most recent assistant message — regenerates that reply. */
   onRegenerate?: () => void;
 }
@@ -36,19 +37,7 @@ function guessFilename(lang: string, code: string, index: number): string {
   return `file_${index}.${ext}`;
 }
 
-const RUNNABLE_LANGS = new Set(["javascript", "js", "typescript", "ts"]);
-
-function extractCodeFiles(text: string): { path: string; content: string }[] {
-  const results: { path: string; content: string }[] = [];
-  const regex = /```(?:\w+)?\n([\s\S]*?)```/g;
-  let match;
-  let i = 1;
-  while ((match = regex.exec(text)) !== null) {
-    const content = match[1].trimEnd();
-    if (content.length > 20) { results.push({ path: `file_${i}.txt`, content }); i++; }
-  }
-  return results;
-}
+const RUNNABLE_LANGS = new Set(["javascript", "js"]);
 
 function formatTime(ts?: number): string {
   if (!ts) return "";
@@ -159,9 +148,7 @@ function RegenerateButton({ onClick }: { onClick: () => void }) {
 // ── Token badge ───────────────────────────────────────────────────────────────
 function TokenBadge({ message }: { message: Message }) {
   const [expanded, setExpanded] = useState(false);
-  const usage = (message as any).usage as
-    | { totalTokens: number; promptTokens: number; completionTokens: number; estimatedCostUsd: number }
-    | undefined;
+  const usage = message.usage;
   if (!usage) return null;
 
   return (
@@ -196,12 +183,11 @@ function useCodeRunner() {
     iframe.style.display = "none";
     document.body.appendChild(iframe);
 
-    let timeoutId: ReturnType<typeof setTimeout>;
+    const timer: { id?: ReturnType<typeof setTimeout> } = {};
 
     const cleanup = () => {
       window.removeEventListener("message", onMessage);
-      // Bug fix #4: cancel the parent-side timeout correctly
-      clearTimeout(timeoutId);
+      if (timer.id) clearTimeout(timer.id);
       if (iframe.parentNode) iframe.remove();
     };
 
@@ -222,7 +208,7 @@ function useCodeRunner() {
     window.addEventListener("message", onMessage);
 
     // Bug fix #4: store as number ID, not the object
-    timeoutId = setTimeout(() => {
+    timer.id = setTimeout(() => {
       lines.push({ type: "error", text: "Execution timed out (5 s)" });
       setOutput([...lines]);
       setRunning(false);
@@ -268,10 +254,10 @@ function CodeBlock({
   const [showPush, setShowPush] = useState(false);
   const [showFullCode, setShowFullCode] = useState(false);
   const isRunnable = RUNNABLE_LANGS.has(lang);
-  const codeFiles = extractCodeFiles(code);
   const lineCount = code.split("\n").length;
   const isLongCode = lineCount > 30;
   const filename = guessFilename(lang, code, fileIndex);
+  const codeFiles = [{ path: filename, content: code }];
 
   // ── Claude-style file card ────────────────────────────────────────────────
   // For substantial code blocks, show a compact clickable card that opens the
@@ -433,11 +419,17 @@ function InlineCode({ children }: { children: React.ReactNode }) {
 }
 
 // ── Main ChatMessage ──────────────────────────────────────────────────────────
-export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpenArtifact, onRegenerate }: Props) {
+export default function ChatMessage({
+  message,
+  activeRepo,
+  onSaveSnippet,
+  onOpenArtifact,
+  onRegenerate,
+  routingBadge,
+}: Props) {
   const isUser   = message.role === "user";
   const isSystem = message.role === "system";
   const [hovered, setHovered] = useState(false);
-  let codeBlockIndex = 0;
 
   if (isSystem) {
     return (
@@ -483,11 +475,17 @@ export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpen
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
-                      code({ className, children }) {
+                      code({ className, children, node }) {
                         const match = /language-(\w+)/.exec(className || "");
                         const codeString = String(children).replace(/\n$/, "");
                         if (match) {
-                          codeBlockIndex += 1;
+                          const sourceBeforeBlock = message.content.slice(
+                            0,
+                            node?.position?.start.offset ?? 0
+                          );
+                          const fileIndex = Math.floor(
+                            (sourceBeforeBlock.match(/```/g)?.length ?? 0) / 2
+                          ) + 1;
                           return (
                             <CodeBlock
                               lang={match[1]}
@@ -495,7 +493,7 @@ export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpen
                               activeRepo={activeRepo}
                               onSaveSnippet={onSaveSnippet}
                               onOpenArtifact={onOpenArtifact}
-                              fileIndex={codeBlockIndex}
+                              fileIndex={fileIndex}
                             />
                           );
                         }
@@ -550,9 +548,17 @@ export default function ChatMessage({ message, activeRepo, onSaveSnippet, onOpen
           {/* Footer: timestamp + token info + regenerate */}
           <div className={`flex items-center gap-3 px-1 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
             {/* Improvement #6: timestamp */}
-            {(message as any).createdAt && (
+            {message.createdAt && (
               <span className="text-[11px] text-zinc-600 light:text-[#a89e8c]">
-                {formatTime((message as any).createdAt)}
+                {formatTime(message.createdAt)}
+              </span>
+            )}
+            {!isUser && routingBadge && (
+              <span
+                className="text-[11px] text-violet-400 light:text-violet-700"
+                title={routingBadge.reason}
+              >
+                {routingBadge.provider} · {routingBadge.model}
               </span>
             )}
             {!isUser && <TokenBadge message={message} />}

@@ -26,7 +26,7 @@ const CHECKS: Omit<EnvCheck, "present">[] = [
   {
     key: "APP_PASSWORD",
     required: false,
-    description: "Optional shared password gate for /api/chat.",
+    description: "Optional password gate for all sensitive API routes.",
   },
   {
     key: "GROQ_API_KEY",

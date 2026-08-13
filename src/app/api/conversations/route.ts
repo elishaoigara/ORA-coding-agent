@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { conversationsSyncSchema, validateOr400 } from "@/lib/validation";
+import { requireAuth } from "@/lib/auth";
 
 const PAT              = process.env.GITHUB_PAT ?? "";
 const GIST_DESCRIPTION = "ORA Coding Agent – conversation history";
@@ -114,6 +115,9 @@ async function patchGist(id: string, merged: StoredConversation[]): Promise<bool
 
 // ── GET ───────────────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
+  const unauthorized = requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   if (!PAT) {
     return NextResponse.json({
       conversations: [],
@@ -162,6 +166,9 @@ export async function GET(req: NextRequest) {
 
 // ── POST ──────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  const unauthorized = requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   if (!PAT) return NextResponse.json({ gistId: null, syncedAt: null });
 
   let raw: unknown;

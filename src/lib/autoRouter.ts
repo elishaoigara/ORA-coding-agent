@@ -35,14 +35,8 @@ export function routeMessage(
   const wordCount = msg.split(/\s+/).length;
   const has = (signals: string[]) => signals.some((s) => msg.includes(s));
 
-  // Bug fix #6: "deepseek-v4-pro" / "deepseek-v4-flash" / the openrouter
-  // slug below are marketing names, not real API model ids — DeepSeek's own
-  // "V4 Flash" model is exposed at the API level simply as "deepseek-chat".
-  // Sending the marketing name as the `model` field causes the upstream
-  // provider to reject the request with a "model not found" error. These
-  // now point at the ids actually registered in lib/providers.ts.
   if (configuredProviders.includes("deepseek") && (has(REASON_SIGNALS) || wordCount > 80)) {
-    return { provider: "deepseek", model: "deepseek-chat", reason: "auto -> DeepSeek V4 Flash (reasoning-length task)" };
+    return { provider: "deepseek", model: "deepseek-v4-pro", reason: "auto -> DeepSeek V4 Pro (complex reasoning task)" };
   }
 
   if (configuredProviders.includes("qwen") && has(CODE_SIGNALS)) {
@@ -50,15 +44,15 @@ export function routeMessage(
   }
 
   if (configuredProviders.includes("groq") && (has(QUICK_SIGNALS) || wordCount < 15)) {
-    return { provider: "groq", model: "llama-3.3-70b-versatile", reason: "auto -> Groq LLaMA (fast)" };
+    return { provider: "groq", model: "llama-3.3-70b-versatile", reason: "auto -> Groq Llama (fast)" };
   }
 
   if (configuredProviders.includes("deepseek")) {
-    return { provider: "deepseek", model: "deepseek-chat", reason: "auto -> DeepSeek V4 Flash (default)" };
+    return { provider: "deepseek", model: "deepseek-v4-flash", reason: "auto -> DeepSeek V4 Flash (default)" };
   }
 
   if (configuredProviders.includes("openrouter")) {
-    return { provider: "openrouter", model: "deepseek/deepseek-chat:free", reason: "auto -> OpenRouter DeepSeek (free)" };
+    return { provider: "openrouter", model: "deepseek/deepseek-v4-flash:free", reason: "auto -> OpenRouter DeepSeek V4 Flash (free)" };
   }
 
   const fallback = configuredProviders[0] ?? "groq";

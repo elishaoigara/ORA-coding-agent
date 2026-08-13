@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Message, InjectedFile, GitHubContext, Conversation } from "@/types";
+import { readSse } from "@/lib/readSse";
 
 export type { Conversation };
 
@@ -45,7 +46,7 @@ async function generateSmartTitle(userMessage: string, assistantReply: string): 
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-app-password": "local" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         messages: [{
           role: "user",
@@ -55,22 +56,15 @@ async function generateSmartTitle(userMessage: string, assistantReply: string): 
       }),
     });
     if (!res.ok) return null;
-    const reader  = res.body?.getReader();
-    if (!reader) return null;
-    const decoder = new TextDecoder();
-    let title = "", buf = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split("\n");
-      buf = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!line.startsWith("data: ") || line === "data: [DONE]") continue;
-        try { title += JSON.parse(line.slice(6)).choices?.[0]?.delta?.content ?? ""; } catch { /* */ }
-      }
-    }
-    return title.trim().replace(/["""'']/g, "").slice(0, 60) || null;
+    let title = "";
+    await readSse(res, ({ event, data }) => {
+      if (event === "error" || data === "[DONE]") return;
+      const payload = JSON.parse(data) as {
+        choices?: Array<{ delta?: { content?: string } }>;
+      };
+      title += payload.choices?.[0]?.delta?.content ?? "";
+    });
+    return title.trim().replace(/[“”"'’]/g, "").slice(0, 60) || null;
   } catch {
     return null;
   }

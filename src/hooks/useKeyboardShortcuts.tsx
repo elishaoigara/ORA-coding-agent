@@ -34,7 +34,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
 
       // Don't fire when typing in inputs/textareas (except ⌘+Enter which is intentional)
       const tag = (e.target as HTMLElement)?.tagName;
-      const inInput = tag === "INPUT" || tag === "SELECT";
+      const inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 
       switch (e.key) {
         case "Enter":

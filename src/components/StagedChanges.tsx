@@ -21,94 +21,91 @@ interface DiffLine {
   lineNo?: number;
 }
 
-function myersDiff(oldLines: string[], newLines: string[]): DiffLine[] {
-  const N = oldLines.length;
-  const M = newLines.length;
-  const MAX = N + M;
+export function myersDiff(oldLines: string[], newLines: string[]): DiffLine[] {
+  const oldLength = oldLines.length;
+  const newLength = newLines.length;
+  const maxDistance = oldLength + newLength;
+  if (maxDistance === 0) return [];
 
-  if (MAX === 0) return [];
+  const frontier = new Map<number, number>([[1, 0]]);
+  const trace: Array<Map<number, number>> = [];
+  let finished = false;
 
-  // Find the shortest edit script via Myers algorithm
-  const v = new Array(2 * MAX + 1).fill(0);
-  const trace: number[][] = [];
+  for (let distance = 0; distance <= maxDistance && !finished; distance += 1) {
+    trace.push(new Map(frontier));
+    for (let diagonal = -distance; diagonal <= distance; diagonal += 2) {
+      const moveDown =
+        diagonal === -distance ||
+        (diagonal !== distance &&
+          (frontier.get(diagonal - 1) ?? -1) < (frontier.get(diagonal + 1) ?? -1));
+      let oldIndex = moveDown
+        ? (frontier.get(diagonal + 1) ?? 0)
+        : (frontier.get(diagonal - 1) ?? 0) + 1;
+      let newIndex = oldIndex - diagonal;
 
-  outer: for (let d = 0; d <= MAX; d++) {
-    const snap = [...v];
-    trace.push(snap);
-    for (let k = -d; k <= d; k += 2) {
-      const idx = k + MAX;
-      let x: number;
-      if (k === -d || (k !== d && v[idx - 1] < v[idx + 1])) {
-        x = v[idx + 1];
-      } else {
-        x = v[idx - 1] + 1;
+      while (
+        oldIndex < oldLength &&
+        newIndex < newLength &&
+        oldLines[oldIndex] === newLines[newIndex]
+      ) {
+        oldIndex += 1;
+        newIndex += 1;
       }
-      let y = x - k;
-      while (x < N && y < M && oldLines[x] === newLines[y]) { x++; y++; }
-      v[idx] = x;
-      if (x >= N && y >= M) break outer;
+      frontier.set(diagonal, oldIndex);
+      if (oldIndex >= oldLength && newIndex >= newLength) {
+        finished = true;
+        break;
+      }
     }
   }
 
-  // Backtrack to build edit script
-  const edits: Array<{ type: "insert" | "delete" | "equal"; old?: string; new?: string }> = [];
-  let x = N;
-  let y = M;
+  const reversed: Array<{ type: "insert" | "delete" | "equal"; text: string }> = [];
+  let oldIndex = oldLength;
+  let newIndex = newLength;
 
-  for (let d = trace.length - 1; d >= 0; d--) {
-    const snap = trace[d];
-    const k = x - y;
-    const idx = k + MAX;
+  for (let distance = trace.length - 1; distance >= 0; distance -= 1) {
+    const snapshot = trace[distance];
+    const diagonal = oldIndex - newIndex;
+    const moveDown =
+      diagonal === -distance ||
+      (diagonal !== distance &&
+        (snapshot.get(diagonal - 1) ?? -1) < (snapshot.get(diagonal + 1) ?? -1));
+    const previousDiagonal = moveDown ? diagonal + 1 : diagonal - 1;
+    const previousOld = snapshot.get(previousDiagonal) ?? 0;
+    const previousNew = previousOld - previousDiagonal;
 
-    let prevK: number;
-    if (k === -d || (k !== d && snap[idx - 1] < snap[idx + 1])) {
-      prevK = k + 1;
+    while (oldIndex > previousOld && newIndex > previousNew) {
+      reversed.push({ type: "equal", text: oldLines[oldIndex - 1] });
+      oldIndex -= 1;
+      newIndex -= 1;
+    }
+
+    if (distance === 0) break;
+    if (oldIndex === previousOld) {
+      reversed.push({ type: "insert", text: newLines[newIndex - 1] });
+      newIndex -= 1;
     } else {
-      prevK = k - 1;
-    }
-
-    const prevX = snap[prevK + MAX];
-    const prevY = prevX - prevK;
-
-    while (x > prevX + (x - y === prevX - prevY ? 0 : 0) && y > prevY &&
-           x > 0 && y > 0 && oldLines[x - 1] === newLines[y - 1]) {
-      edits.unshift({ type: "equal", old: oldLines[x - 1], new: newLines[y - 1] });
-      x--; y--;
-    }
-
-    if (d > 0) {
-      if (prevK === k - 1) {
-        if (y > prevY) {
-          edits.unshift({ type: "insert", new: newLines[y - 1] });
-          y--;
-        }
-      } else {
-        if (x > prevX) {
-          edits.unshift({ type: "delete", old: oldLines[x - 1] });
-          x--;
-        }
-      }
+      reversed.push({ type: "delete", text: oldLines[oldIndex - 1] });
+      oldIndex -= 1;
     }
   }
 
-  // Convert to DiffLine[] with line numbers
   const result: DiffLine[] = [];
-  let oldLineNo = 1;
-  let newLineNo = 1;
-
-  for (const edit of edits) {
+  let oldLineNumber = 1;
+  let newLineNumber = 1;
+  for (const edit of reversed.reverse()) {
     if (edit.type === "equal") {
-      result.push({ type: "same", text: edit.old!, lineNo: oldLineNo });
-      oldLineNo++; newLineNo++;
+      result.push({ type: "same", text: edit.text, lineNo: oldLineNumber });
+      oldLineNumber += 1;
+      newLineNumber += 1;
     } else if (edit.type === "delete") {
-      result.push({ type: "remove", text: edit.old!, lineNo: oldLineNo });
-      oldLineNo++;
+      result.push({ type: "remove", text: edit.text, lineNo: oldLineNumber });
+      oldLineNumber += 1;
     } else {
-      result.push({ type: "add", text: edit.new!, lineNo: newLineNo });
-      newLineNo++;
+      result.push({ type: "add", text: edit.text, lineNo: newLineNumber });
+      newLineNumber += 1;
     }
   }
-
   return result;
 }
 
@@ -300,10 +297,14 @@ export default function StagedChanges({ files, repo, onPush, onDiscard, onOpenAr
   // UI improvement #2: per-file selection
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set(files.map((f) => f.path)));
 
-  // Sync branch when defaultBranch prop changes
   useEffect(() => {
     if (defaultBranch) setBranch(defaultBranch);
   }, [defaultBranch]);
+
+  useEffect(() => {
+    setSelectedPaths(new Set(files.map((file) => file.path)));
+    setPushResult(null);
+  }, [files]);
 
   function toggleFile(path: string) {
     setSelectedPaths((prev) => {
@@ -345,7 +346,7 @@ export default function StagedChanges({ files, repo, onPush, onDiscard, onOpenAr
       if (data.success) {
         setPushResult({
           success: true,
-          message: `✓ Pushed ${data.files.length} file(s) to ${data.branch} (${data.commit})`,
+          message: `✓ Pushed ${data.changedFiles + data.deletions} file(s) to ${data.branch} (${data.commit})`,
           url: data.url,
         });
         // Bug fix #6: was calling onPush(() => {}) — now properly clears parent staged state

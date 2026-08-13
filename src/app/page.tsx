@@ -9,6 +9,7 @@ import PlanApproval from "@/components/PlanApproval";
 import LocalFileContext from "@/components/LocalFileContext";
 import ArtifactPanel, { type Artifact } from "@/components/ArtifactPanel";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import AuthGate from "@/components/AuthGate";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
 import { buildTokenUsage, sumUsage, formatCost } from "@/lib/tokenCost";
@@ -17,8 +18,9 @@ import { useTheme, ThemeToggleButton } from "@/lib/theme";
 import { SYSTEM_PROMPT_TEMPLATES } from "@/lib/promptTemplates";
 import type { Message, InjectedFile, PublicProvider, GitHubContext } from "@/types";
 import type { StagedFile } from "@/lib/agentTools";
-import type { AgentPlan } from "@/app/api/agent/route";
+import type { AgentPlan } from "@/lib/agent/types";
 import type { TokenUsage } from "@/lib/tokenCost";
+import { readSse } from "@/lib/readSse";
 
 const QUICK_PROMPTS = [
   "Review my code for bugs and suggest improvements",
@@ -41,6 +43,31 @@ interface ContinueEvent {
   messages: unknown[];
   stagedFiles: StagedFile[];
   progress?: string;
+}
+
+interface AgentStreamEvent {
+  type: "meta" | "progress" | "tool_call" | "text" | "plan" | "staged" | "error" | "continue" | "done";
+  text?: string;
+  plan?: AgentPlan;
+  files?: StagedFile[];
+  messages?: unknown[];
+  stagedFiles?: StagedFile[];
+  progress?: string;
+}
+
+function upsertStagedFiles(current: StagedFile[], incoming: StagedFile[]): StagedFile[] {
+  const byPath = new Map(current.map((file) => [file.path, file]));
+  for (const file of incoming) byPath.set(file.path, file);
+  return Array.from(byPath.values());
+}
+
+async function responseError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: string };
+    return body.error || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 // Bug fix #9: SSR-safe localStorage helpers
@@ -90,7 +117,7 @@ const IconStop = () => (
   </svg>
 );
 
-export default function Home() {
+function Workspace() {
   const [messages, setMessages]           = useState<Message[]>([]);
   const [routingBadges, setRoutingBadges] = useState<Record<number, RoutingBadge>>({});
   const [input, setInput]                 = useState("");
@@ -100,7 +127,6 @@ export default function Home() {
   const [providers, setProviders]         = useState<PublicProvider[]>([]);
   const [selectedProviderId, setSelectedProviderId] = useState("auto");
   const [selectedModel, setSelectedModel] = useState("");
-  const [password]                        = useState("local");
   const [showHistory, setShowHistory]     = useState(false);
   const [showGitHub, setShowGitHub]       = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
@@ -137,7 +163,7 @@ export default function Home() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
   const [kbHeight, setKbHeight] = useState(0);
-  const abortRef  = useRef<AbortController | null>(null); // for future cancel support
+  const abortRef  = useRef<AbortController | null>(null);
 
   // Track software keyboard height via visualViewport
   useEffect(() => {
@@ -158,7 +184,7 @@ export default function Home() {
   const {
     conversations, active, activeId, syncing,
     newConversation, saveConversation, saveGitHubContext,
-    loadConversation, deleteConversation, setProject, saveSystemPrompt,
+    loadConversation, deleteConversation, saveSystemPrompt,
     forceSync,
   } = useConversations();
 
@@ -166,8 +192,8 @@ export default function Home() {
 
   useKeyboardShortcuts({
     onSend:          () => !loading && sendMessage(),
-    onNewChat:       newConversation,
-    onToggleAgent:   () => setAgentMode((v) => !v),
+    onNewChat:       handleNewChat,
+    onToggleAgent:   () => !loading && setAgentMode((v) => !v),
     onToggleHistory: () => setShowHistory((v) => !v),
     onToggleGitHub:  () => setShowGitHub((v) => !v),
     onShowHelp:      () => setShowHelp((v) => !v),
@@ -184,6 +210,7 @@ export default function Home() {
   useEffect(() => {
     if (active) {
       setMessages(active.messages);
+      setConvUsage(sumUsage(active.messages.map((message) => message.usage ?? null)));
       setRoutingBadges({});
       setSelectedProviderId(active.provider || "auto");
       const p = providers.find((p) => p.id === active.provider);
@@ -193,16 +220,20 @@ export default function Home() {
       if (active.githubContext) {
         setActiveRepo(active.githubContext.repo);
         setInjectedFiles(active.githubContext.files);
+      } else {
+        setActiveRepo("");
+        setInjectedFiles([]);
       }
     } else {
       setMessages([]);
+      setConvUsage(null);
       setRoutingBadges({});
       setProjectInput("");
       setSystemPrompt("");
       setInjectedFiles([]);
       setActiveRepo("");
     }
-  }, [activeId, providers]); // Bug fix #8: added `providers`
+  }, [active, providers]);
 
   function handleProviderChange(providerId: string) {
     setSelectedProviderId(providerId);
@@ -218,102 +249,130 @@ export default function Home() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading, stagedFiles, currentPlan]);
 
-  function handleFilesChange(files: InjectedFile[], repo: string) {
+  const handleFilesChange = useCallback((files: InjectedFile[], repo: string) => {
     setInjectedFiles(files);
     setActiveRepo(repo);
     if (activeId && repo) saveGitHubContext(repo, files);
-  }
+  }, [activeId, saveGitHubContext]);
 
   async function sendChat(userText: string, baseMessages?: Message[]) {
-    const newMessages: Message[] = [...(baseMessages ?? messages), { role: "user", content: userText }];
-    setMessages(newMessages);
+    const controller = new AbortController();
+    abortRef.current?.abort();
+    abortRef.current = controller;
+
+    const now = Date.now();
+    const newMessages: Message[] = [
+      ...(baseMessages ?? messages),
+      { role: "user", content: userText, createdAt: now },
+    ];
+    setMessages([...newMessages, { role: "assistant", content: "", createdAt: now }]);
     setLoading(true);
     const assistantIndex = newMessages.length;
-    setMessages((m) => [...m, { role: "assistant", content: "" }]);
-
-    const messagesWithSys: Message[] = systemPrompt.trim()
+    const messagesWithSystem: Message[] = systemPrompt.trim()
       ? [{ role: "system", content: systemPrompt.trim() }, ...newMessages]
       : newMessages;
+    const contextFiles = Array.from(
+      new Map([...injectedFiles, ...localFiles].map((file) => [file.path, file])).values()
+    );
+    let fullText = "";
+    let capturedUsage: TokenUsage | null = null;
 
     try {
-      const res = await fetch("/api/chat", {
+      const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-app-password": password },
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
-          messages: messagesWithSys,
+          messages: messagesWithSystem,
           model: resolveModel(selectedModel, selectedProviderId as ProviderId),
           provider: selectedProviderId,
-          injectedFiles,
+          injectedFiles: contextFiles,
         }),
       });
 
-      if (!res.ok) {
-        const err = await res.json();
-        setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `❌ Error: ${err.error}` }]);
-        return;
+      if (!response.ok) {
+        throw new Error(await responseError(response, "Chat request failed"));
       }
 
       if (isAuto) {
-        const rp = res.headers.get("X-Routed-Provider") ?? "";
-        const rm = res.headers.get("X-Routed-Model") ?? "";
-        const rr = res.headers.get("X-Route-Reason") ?? "";
-        if (rp) setRoutingBadges((b) => ({ ...b, [assistantIndex]: { provider: rp, model: rm, reason: rr } }));
-      }
-
-      const reader  = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let fullText  = "";
-      let sseLineBuffer = "";
-      let capturedUsage: TokenUsage | null = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        sseLineBuffer += decoder.decode(value, { stream: true });
-        const rawLines = sseLineBuffer.split("\n");
-        sseLineBuffer = rawLines.pop() ?? "";
-
-        let currentEvent = "";
-        for (const line of rawLines) {
-          if (line.startsWith("event: ")) { currentEvent = line.slice(7).trim(); continue; }
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            if (data === "[DONE]") { currentEvent = ""; continue; }
-            try {
-              const parsed = JSON.parse(data);
-              if (currentEvent === "usage") {
-                const resolvedModel = res.headers.get("X-Routed-Model") ?? "";
-                const resolvedProv  = res.headers.get("X-Routed-Provider") ?? selectedProviderId;
-                capturedUsage = buildTokenUsage(parsed, resolvedProv, resolvedModel);
-              } else {
-                const delta = parsed.choices?.[0]?.delta?.content ?? "";
-                fullText += delta;
-                setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: fullText }]);
-              }
-            } catch { /* incomplete chunk */ }
-            currentEvent = "";
-          }
+        const provider = response.headers.get("X-Routed-Provider") ?? "";
+        const model = response.headers.get("X-Routed-Model") ?? "";
+        const reason = response.headers.get("X-Route-Reason") ?? "";
+        if (provider) {
+          setRoutingBadges((badges) => ({
+            ...badges,
+            [assistantIndex]: { provider, model, reason },
+          }));
         }
       }
 
+      await readSse(response, ({ event, data }) => {
+        if (data === "[DONE]") return;
+        const payload = JSON.parse(data) as {
+          error?: string;
+          choices?: Array<{ delta?: { content?: string } }>;
+          usage?: {
+            prompt_tokens?: number;
+            completion_tokens?: number;
+            total_tokens?: number;
+          };
+        };
+
+        if (event === "error") {
+          throw new Error(payload.error || "The provider stream failed");
+        }
+        if (event === "usage") {
+          const routedModel = response.headers.get("X-Routed-Model") || selectedModel;
+          const routedProvider = response.headers.get("X-Routed-Provider") || selectedProviderId;
+          capturedUsage = buildTokenUsage(payload, routedProvider, routedModel);
+          return;
+        }
+
+        const delta = payload.choices?.[0]?.delta?.content ?? "";
+        if (!delta) return;
+        fullText += delta;
+        setMessages((current) => [
+          ...current.slice(0, -1),
+          { role: "assistant", content: fullText, createdAt: now },
+        ]);
+      });
+
+      if (!fullText.trim()) throw new Error("The provider returned an empty response");
+
+      const finalAssistant: Message = {
+        role: "assistant",
+        content: fullText,
+        createdAt: now,
+        ...(capturedUsage ? { usage: capturedUsage } : {}),
+      };
+      setMessages((current) => [...current.slice(0, -1), finalAssistant]);
       if (capturedUsage) {
-        setMessages((m) => {
-          const last = m[m.length - 1];
-          if (last?.role === "assistant") return [...m.slice(0, -1), { ...last, usage: capturedUsage }];
-          return m;
-        });
-        setConvUsage((prev) => sumUsage([prev, capturedUsage]));
+        setConvUsage((previous) => sumUsage([previous, capturedUsage]));
       }
 
-      const ghCtx: GitHubContext | undefined = activeRepo && injectedFiles.length
-        ? { repo: activeRepo, files: injectedFiles, pinnedAt: Date.now() } : undefined;
+      const githubContext: GitHubContext | undefined = activeRepo
+        ? { repo: activeRepo, files: injectedFiles, pinnedAt: Date.now() }
+        : undefined;
       saveConversation(
-        [...newMessages, { role: "assistant", content: fullText }],
-        selectedProviderId, selectedModel, active?.project ?? projectInput, ghCtx
+        [...newMessages, finalAssistant],
+        selectedProviderId,
+        selectedModel,
+        active?.project ?? projectInput,
+        githubContext
       );
-    } catch (e) {
-      setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `Network error: ${(e as Error).message}` }]);
+    } catch (error) {
+      const stopped = error instanceof Error && error.name === "AbortError";
+      const content = stopped
+        ? fullText
+          ? `${fullText}\n\n_Stopped._`
+          : "Generation stopped."
+        : `❌ ${error instanceof Error ? error.message : "Chat request failed"}`;
+      setMessages((current) => [
+        ...current.slice(0, -1),
+        { role: "assistant", content, createdAt: now },
+      ]);
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setLoading(false);
     }
   }
@@ -339,111 +398,95 @@ export default function Home() {
     await sendChat(userText, truncated);
   }
 
-  async function readAgentStream(res: Response): Promise<{
-    agentText: string; plan?: AgentPlan; staged: StagedFile[]; continuePayload?: ContinueEvent;
+  async function readAgentStream(response: Response): Promise<{
+    agentText: string;
+    plan?: AgentPlan;
+    staged: StagedFile[];
+    continuePayload?: ContinueEvent;
   }> {
-    const reader  = res.body!.getReader();
-    const decoder = new TextDecoder();
     let agentText = "";
     let parsedPlan: AgentPlan | undefined;
-    let sseBuffer = "";
-    const staged: StagedFile[] = [];
+    let staged: StagedFile[] = [];
     let receivedDone = false;
+    let streamError = "";
     let continuePayload: ContinueEvent | undefined;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      sseBuffer += decoder.decode(value, { stream: true });
-      const rawLines = sseBuffer.split("\n");
-      sseBuffer = rawLines.pop() ?? "";
-
-      for (const line of rawLines.filter((l) => l.startsWith("data: "))) {
-        try {
-          const event = JSON.parse(line.slice(6));
-          if (event.type === "progress" || event.type === "tool_call") {
-            setAgentStatus(event.text ?? "");
-          }
-          if (event.type === "text") {
-            agentText += event.text ?? "";
-            setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: agentText }]);
-          }
-          if (event.type === "plan") parsedPlan = event.plan;
-          if (event.type === "staged") {
-            const incoming: StagedFile[] = event.files ?? [];
-            staged.push(...incoming);
-            setStagedFiles((s) => {
-              const existing = new Set(s.map((f) => f.path));
-              const newOnes  = incoming.filter((f) => !existing.has(f.path));
-              return newOnes.length > 0 ? [...s, ...newOnes] : s;
-            });
-          }
-          if (event.type === "error") {
-            const errMsg = `❌ ${event.text}`;
-            setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: errMsg }]);
-            agentText = errMsg;
-          }
-          if (event.type === "continue") {
-            continuePayload = { messages: event.messages ?? [], stagedFiles: event.stagedFiles ?? [], progress: event.progress };
-            if (staged.length > 0) {
-              const existing = new Set(continuePayload.stagedFiles.map((f) => f.path));
-              for (const f of staged) { if (!existing.has(f.path)) continuePayload.stagedFiles.push(f); }
-            }
-            setAgentStatus(continuePayload.progress ?? "Continuing…");
-          }
-          if (event.type === "done") {
-            receivedDone = true;
-            setAgentStatus("");
-            if (!agentText.trim()) {
-              const fallback = staged.length > 0
-                ? "Execution complete. Review the staged changes below and push when ready."
-                : "⚠️ Agent finished but staged no files. Try switching to DeepSeek V4 Flash or re-run the task.";
-              agentText = fallback;
-              setMessages((m) => {
-                const last = m[m.length - 1];
-                if (last?.role === "assistant" && !last.content.trim())
-                  return [...m.slice(0, -1), { role: "assistant", content: fallback }];
-                return m;
-              });
-            }
-          }
-        } catch { /* incomplete JSON */ }
+    await readSse(response, ({ data }) => {
+      const event = JSON.parse(data) as AgentStreamEvent;
+      if (event.type === "progress" || event.type === "tool_call") {
+        setAgentStatus(event.text ?? "");
+      } else if (event.type === "text") {
+        agentText += event.text ?? "";
+        setMessages((current) => [
+          ...current.slice(0, -1),
+          { role: "assistant", content: agentText, createdAt: Date.now() },
+        ]);
+      } else if (event.type === "plan") {
+        parsedPlan = event.plan;
+      } else if (event.type === "staged") {
+        const incoming = event.files ?? [];
+        staged = upsertStagedFiles(staged, incoming);
+        setStagedFiles((current) => upsertStagedFiles(current, incoming));
+      } else if (event.type === "error") {
+        streamError = event.text || "Agent execution failed";
+      } else if (event.type === "continue") {
+        continuePayload = {
+          messages: event.messages ?? [],
+          stagedFiles: upsertStagedFiles(staged, event.stagedFiles ?? []),
+          progress: event.progress,
+        };
+        setAgentStatus(event.progress ?? "Continuing…");
+      } else if (event.type === "done") {
+        receivedDone = true;
+        setAgentStatus("");
       }
+    });
+
+    if (streamError) throw new Error(streamError);
+
+    if (receivedDone && !agentText.trim()) {
+      agentText = staged.length > 0
+        ? "Execution complete. Review the staged changes below and push when ready."
+        : parsedPlan
+          ? "Plan ready for review."
+          : "The agent completed without staging files.";
+      setMessages((current) => {
+        const last = current[current.length - 1];
+        if (last?.role !== "assistant" || last.content.trim()) return current;
+        return [...current.slice(0, -1), { ...last, content: agentText }];
+      });
     }
 
     if (!receivedDone && !continuePayload) {
-      setAgentStatus("");
-      if (!agentText.trim()) {
-        const fallback = staged.length > 0
-          ? "Execution complete. Review the staged changes below."
-          : "⚠️ The request timed out mid-execution. Check if any files were staged below, or try a smaller task.";
-        agentText = fallback;
-        setMessages((m) => {
-          const last = m[m.length - 1];
-          if (last?.role === "assistant" && !last.content.trim())
-            return [...m.slice(0, -1), { role: "assistant", content: fallback }];
-          return m;
-        });
-      }
+      throw new Error("The agent stream ended before completion");
     }
+
     return { agentText, plan: parsedPlan, staged, continuePayload };
   }
 
   async function callAgentApi(params: {
-    phase: "plan" | "execute"; task: string; plan?: AgentPlan;
-    resumeMessages?: unknown[]; resumeStagedFiles?: StagedFile[];
+    phase: "plan" | "execute";
+    task: string;
+    plan?: AgentPlan;
+    branch?: string;
+    resumeMessages?: unknown[];
+    resumeStagedFiles?: StagedFile[];
   }): Promise<Response> {
     return fetch("/api/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: abortRef.current?.signal,
       body: JSON.stringify({
-        task:              params.task,
-        repo:              activeRepo,
-        phase:             params.phase,
-        plan:              params.plan,
-        provider:          isAuto ? "qwen" : selectedProviderId,
-        model:             isAuto ? "qwen3-coder-plus" : resolveModel(selectedModel, selectedProviderId as ProviderId),
-        resumeMessages:    params.resumeMessages,
+        task: params.task,
+        repo: activeRepo,
+        phase: params.phase,
+        plan: params.plan,
+        branch: params.branch || undefined,
+        provider: selectedProviderId,
+        model: isAuto
+          ? undefined
+          : resolveModel(selectedModel, selectedProviderId as ProviderId),
+        resumeMessages: params.resumeMessages,
         resumeStagedFiles: params.resumeStagedFiles,
       }),
     });
@@ -451,109 +494,187 @@ export default function Home() {
 
   async function startPlanning(userText: string) {
     if (!activeRepo) {
-      setMessages((m) => [...m,
-        { role: "user", content: userText },
-        { role: "assistant", content: "⚠️ Open the GitHub panel and select a repo first." },
+      setMessages((current) => [
+        ...current,
+        { role: "user", content: userText, createdAt: Date.now() },
+        {
+          role: "assistant",
+          content: "Open the GitHub panel and select a repository before using Agent mode.",
+          createdAt: Date.now(),
+        },
       ]);
       return;
     }
-    if (branchFirst && activeRepo) {
-      const slug = userText.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40).replace(/-$/, "");
-      const newBranch = `agent/${slug}-${Date.now().toString(36)}`;
-      try {
-        await fetch("/api/github", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "create_branch", repo: activeRepo, branchName: newBranch }),
-        });
-        setAgentBranch(newBranch);
-      } catch { console.warn("Branch creation failed"); }
-    } else {
-      setAgentBranch("");
-    }
+
+    const controller = new AbortController();
+    abortRef.current?.abort();
+    abortRef.current = controller;
+    let workingBranch = "";
+
     setCurrentTask(userText);
     setCurrentPlan(null);
     setStagedFiles([]);
     setAgentIteration(0);
     setAgentPhase("planning");
     setLoading(true);
-    const newMessages: Message[] = [...messages, { role: "user", content: userText }];
-    setMessages(newMessages);
-    setMessages((m) => [...m, { role: "assistant", content: "" }]);
+    const newMessages: Message[] = [
+      ...messages,
+      { role: "user", content: userText, createdAt: Date.now() },
+    ];
+    setMessages([...newMessages, { role: "assistant", content: "", createdAt: Date.now() }]);
+
     try {
-      const res = await callAgentApi({ phase: "plan", task: userText });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error ?? "Agent request failed"); }
-      const { agentText, plan } = await readAgentStream(res);
-      if (plan) { setCurrentPlan(plan); setAgentPhase("awaiting_approval"); }
-      else setAgentPhase("done");
-      saveConversation([...newMessages, { role: "assistant", content: agentText }], selectedProviderId, selectedModel, active?.project ?? projectInput);
-    } catch (e) {
-      setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `❌ ${(e as Error).message}` }]);
+      if (branchFirst) {
+        const slug = userText
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .slice(0, 40)
+          .replace(/-$/, "") || "changes";
+        workingBranch = `agent/${slug}-${Date.now().toString(36)}`;
+        setAgentStatus(`Creating ${workingBranch}…`);
+        const branchResponse = await fetch("/api/github", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            action: "create_branch",
+            repo: activeRepo,
+            branchName: workingBranch,
+          }),
+        });
+        if (!branchResponse.ok) {
+          throw new Error(await responseError(branchResponse, "Could not create the agent branch"));
+        }
+        setAgentBranch(workingBranch);
+      } else {
+        setAgentBranch("");
+      }
+
+      const response = await callAgentApi({
+        phase: "plan",
+        task: userText,
+        branch: workingBranch,
+      });
+      if (!response.ok) {
+        throw new Error(await responseError(response, "Agent request failed"));
+      }
+      const result = await readAgentStream(response);
+      if (!result.plan) throw new Error("The agent did not return a valid plan");
+
+      setCurrentPlan(result.plan);
+      setAgentPhase("awaiting_approval");
+      saveConversation(
+        [...newMessages, { role: "assistant", content: result.agentText, createdAt: Date.now() }],
+        selectedProviderId,
+        selectedModel,
+        active?.project ?? projectInput,
+        { repo: activeRepo, files: injectedFiles, pinnedAt: Date.now() }
+      );
+    } catch (error) {
+      const stopped = error instanceof Error && error.name === "AbortError";
+      setMessages((current) => [
+        ...current.slice(0, -1),
+        {
+          role: "assistant",
+          content: stopped
+            ? "Agent stopped."
+            : `❌ ${error instanceof Error ? error.message : "Planning failed"}`,
+          createdAt: Date.now(),
+        },
+      ]);
       setAgentPhase("idle");
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setLoading(false);
       setAgentStatus("");
     }
   }
 
   async function executePlan(approvedPlan: AgentPlan) {
+    const controller = new AbortController();
+    abortRef.current?.abort();
+    abortRef.current = controller;
     setAgentPhase("executing");
     setLoading(true);
     setStagedFiles([]);
     setCurrentPlan(null);
     setAgentIteration(0);
+
     const taskSnapshot = currentTask;
-    const approvalMsg: Message = { role: "user", content: "✓ Plan approved — execute it now." };
-    const newMessages = [...messages, approvalMsg];
-    setMessages(newMessages);
-    setMessages((m) => [...m, { role: "assistant", content: "" }]);
+    const approvalMessage: Message = {
+      role: "user",
+      content: "Plan approved — execute it now.",
+      createdAt: Date.now(),
+    };
+    const newMessages = [...messages, approvalMessage];
+    setMessages([...newMessages, { role: "assistant", content: "", createdAt: Date.now() }]);
+
     let resumeMessages: unknown[] | undefined;
     let resumeStagedFiles: StagedFile[] | undefined;
     let finalText = "";
     let batchCount = 0;
-    const MAX_BATCHES = 20;
-    try {
-      while (batchCount < MAX_BATCHES) {
-        batchCount++;
-        setAgentIteration(batchCount); // UI improvement #1: track iteration
-        const res = await callAgentApi({ phase: "execute", task: taskSnapshot, plan: approvedPlan, resumeMessages, resumeStagedFiles });
-        if (!res.ok) { const err = await res.json(); throw new Error(err.error ?? "Agent request failed"); }
-        const { agentText, staged, continuePayload } = await readAgentStream(res);
-        if (agentText && !agentText.startsWith("❌")) finalText = agentText;
-        if (staged.length > 0) {
-          setStagedFiles((existing) => {
-            const existingPaths = new Set(existing.map((f) => f.path));
-            const newOnes = staged.filter((f) => !existingPaths.has(f.path));
-            return newOnes.length > 0 ? [...existing, ...newOnes] : existing;
-          });
-        }
-        if (continuePayload) {
-          resumeMessages = continuePayload.messages;
-          resumeStagedFiles = continuePayload.stagedFiles;
-          await new Promise((r) => setTimeout(r, 300));
-          continue;
-        }
-        break;
-      }
+    let needsContinuation = false;
+    const maxBatches = 20;
 
-      // Bug fix #3: warn user if MAX_BATCHES was hit without completion
-      if (batchCount >= MAX_BATCHES) {
-        setMessages((m) => {
-          const last = m[m.length - 1];
-          const warning = "\n\n⚠️ Reached the maximum batch limit. Some changes may be incomplete — review staged files carefully.";
-          if (last?.role === "assistant") {
-            return [...m.slice(0, -1), { ...last, content: last.content + warning }];
-          }
-          return [...m, { role: "assistant", content: warning }];
+    try {
+      do {
+        batchCount += 1;
+        setAgentIteration(batchCount);
+        const response = await callAgentApi({
+          phase: "execute",
+          task: taskSnapshot,
+          plan: approvedPlan,
+          branch: agentBranch,
+          resumeMessages,
+          resumeStagedFiles,
         });
+        if (!response.ok) {
+          throw new Error(await responseError(response, "Agent request failed"));
+        }
+
+        const result = await readAgentStream(response);
+        if (result.agentText) finalText = result.agentText;
+        if (result.staged.length > 0) {
+          setStagedFiles((current) => upsertStagedFiles(current, result.staged));
+        }
+
+        needsContinuation = Boolean(result.continuePayload);
+        if (result.continuePayload) {
+          resumeMessages = result.continuePayload.messages;
+          resumeStagedFiles = result.continuePayload.stagedFiles;
+        }
+      } while (needsContinuation && batchCount < maxBatches && !controller.signal.aborted);
+
+      if (needsContinuation) {
+        throw new Error(
+          "The agent reached the maximum batch limit. Review the staged files; the approved plan may be incomplete."
+        );
       }
 
       setAgentPhase("done");
-      saveConversation([...newMessages, { role: "assistant", content: finalText }], selectedProviderId, selectedModel, active?.project ?? projectInput);
-    } catch (e) {
-      setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: `❌ ${(e as Error).message}` }]);
+      saveConversation(
+        [...newMessages, { role: "assistant", content: finalText, createdAt: Date.now() }],
+        selectedProviderId,
+        selectedModel,
+        active?.project ?? projectInput,
+        { repo: activeRepo, files: injectedFiles, pinnedAt: Date.now() }
+      );
+    } catch (error) {
+      const stopped = error instanceof Error && error.name === "AbortError";
+      setMessages((current) => {
+        const last = current[current.length - 1];
+        const prefix = last?.role === "assistant" ? last.content : "";
+        const detail = stopped
+          ? "Agent stopped. Any files already staged are preserved for review."
+          : `❌ ${error instanceof Error ? error.message : "Agent execution failed"}`;
+        return [
+          ...current.slice(0, -1),
+          { role: "assistant", content: prefix ? `${prefix}\n\n${detail}` : detail, createdAt: Date.now() },
+        ];
+      });
       setAgentPhase("idle");
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setLoading(false);
       setAgentStatus("");
       setAgentIteration(0);
@@ -563,7 +684,7 @@ export default function Home() {
   async function sendMessage(text?: string) {
     const userText = (text ?? input).trim();
     // Bug fix #2: explicitly check isAgentBusy, don't just rely on loading flag
-    if (!userText || loading || isAgentBusy) return;
+    if (!userText || loading || isAgentBusy || agentPhase === "awaiting_approval") return;
     setInput("");
     if (agentMode) await startPlanning(userText);
     else await sendChat(userText);
@@ -573,10 +694,16 @@ export default function Home() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   }
 
+  function stopCurrentRequest() {
+    setAgentStatus("Stopping…");
+    abortRef.current?.abort();
+  }
+
   function handleNewChat() {
+    abortRef.current?.abort();
     newConversation();
     setMessages([]); setRoutingBadges({}); setProjectInput(""); setSystemPrompt("");
-    setInjectedFiles([]); setActiveRepo(""); setStagedFiles([]); setCurrentPlan(null);
+    setInjectedFiles([]); setLocalFiles([]); setActiveRepo(""); setStagedFiles([]); setCurrentPlan(null);
     setAgentPhase("idle"); setConvUsage(null); setAgentBranch(""); setAgentIteration(0);
   }
 
@@ -592,7 +719,7 @@ export default function Home() {
     setShowHistory(false); setShowGitHub(false); setShowModelPicker(false);
   }, []);
 
-  useEffect(() => { closeAll(); }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { closeAll(); }, [activeId, closeAll]);
 
   // Bug fix #2: explicit isAgentBusy check
   const isAgentBusy   = agentPhase === "planning" || agentPhase === "executing";
@@ -603,6 +730,7 @@ export default function Home() {
     ? "Auto"
     : (activeProvider?.models.find((m) => m.id === selectedModel)?.label ?? selectedModel ?? "Model");
   const providerLabel = isAuto ? "Auto" : (activeProvider?.name ?? selectedProviderId);
+  const contextWindow = activeProvider?.models.find((model) => model.id === selectedModel)?.contextWindow;
 
   // UI improvement #1: format agent progress label
   const agentProgressLabel = agentPhase === "planning"
@@ -693,7 +821,8 @@ export default function Home() {
 
             <button
               onClick={() => setAgentMode((v) => !v)}
-              className={`touch-target rounded-lg px-2.5 text-xs font-medium transition-colors ${
+              disabled={loading}
+              className={`touch-target disabled:opacity-50 rounded-lg px-2.5 text-xs font-medium transition-colors ${
                 agentMode
                   ? "bg-violet-700 text-violet-100 agent-active"
                   : "text-zinc-500 hover:text-zinc-200 bg-zinc-800 light:text-[#8a7f6d] light:bg-[#efe9dd] light:hover:text-[#2b2620]"
@@ -702,6 +831,23 @@ export default function Home() {
             >
               {agentMode ? "Agent" : "Chat"}
             </button>
+
+            {agentMode && (
+              <button
+                type="button"
+                onClick={() => setBranchFirst((enabled) => !enabled)}
+                className={`touch-target rounded-lg text-xs transition-colors ${
+                  branchFirst
+                    ? "bg-teal-900/40 text-teal-300 light:bg-teal-50 light:text-teal-700"
+                    : "bg-zinc-800 text-zinc-500 hover:text-zinc-200 light:bg-[#efe9dd] light:text-[#8a7f6d]"
+                }`}
+                aria-pressed={branchFirst}
+                aria-label="Create a branch before agent changes"
+                title={branchFirst ? "Branch-first safety enabled" : "Enable branch-first safety"}
+              >
+                ⎇
+              </button>
+            )}
 
             <button
               onClick={() => setShowGitHub((v) => !v)}
@@ -888,6 +1034,7 @@ export default function Home() {
             <ChatMessage
               key={msg.id ?? i}
               message={msg}
+              routingBadge={routingBadges[i]}
               activeRepo={activeRepo}
               onSaveSnippet={saveSnippet}
               onOpenArtifact={openArtifact}
@@ -976,9 +1123,14 @@ export default function Home() {
                   </span>
                 )}
                 {localFiles.length > 0 && (
-                  <span className="text-xs text-blue-400 light:text-blue-700 bg-blue-900/30 light:bg-blue-50 rounded-full px-2.5 py-1 whitespace-nowrap flex-shrink-0">
-                    {localFiles.length} local
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setLocalFiles([])}
+                    title="Remove local file context"
+                    className="text-xs text-blue-400 light:text-blue-700 bg-blue-900/30 light:bg-blue-50 rounded-full px-2.5 py-1 whitespace-nowrap flex-shrink-0"
+                  >
+                    {localFiles.length} local ×
+                  </button>
                 )}
                 {agentMode && (
                   <span className="text-xs text-violet-400 light:text-violet-700 bg-violet-900/30 light:bg-violet-50 rounded-full px-2.5 py-1 whitespace-nowrap flex-shrink-0">
@@ -1028,15 +1180,12 @@ export default function Home() {
               </div>
 
               {/* Send / stop button */}
-              {isAgentBusy ? (
+              {loading || isAgentBusy ? (
                 <button
-                  onClick={() => {
-                    // UI improvement: stop indicator (abort is non-trivial without streaming cancellation, shows intent)
-                    setAgentStatus("Stopping…");
-                  }}
+                  onClick={stopCurrentRequest}
                   className="flex items-center justify-center rounded-xl w-[46px] h-[46px] flex-shrink-0 bg-zinc-700 hover:bg-red-800/70 text-zinc-400 hover:text-red-300 light:bg-[#efe9dd] light:text-[#8a7f6d] light:hover:bg-red-100 light:hover:text-red-600 transition-all"
-                  aria-label="Stop agent"
-                  title="Stop agent"
+                  aria-label="Stop current request"
+                  title="Stop current request"
                 >
                   <IconStop />
                 </button>
@@ -1084,6 +1233,7 @@ export default function Home() {
               onFilesChange={handleFilesChange}
               savedContext={active?.githubContext}
               pinnedFiles={pinnedFiles}
+              contextWindow={contextWindow}
               onTogglePinnedFile={(repo, filePath) => {
                 setPinnedFiles((prev) => {
                   const current = prev[repo] || [];
@@ -1103,5 +1253,12 @@ export default function Home() {
       <ShortcutHelpModal open={showHelp} onClose={() => setShowHelp(false)} />
     </div>
     </ErrorBoundary>
+  );
+}
+export default function Home() {
+  return (
+    <AuthGate>
+      <Workspace />
+    </AuthGate>
   );
 }

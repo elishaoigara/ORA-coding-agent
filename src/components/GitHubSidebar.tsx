@@ -42,11 +42,9 @@ export default function GitHubSidebar({
 }: Props) {
   const [repo, setRepo]             = useState(savedContext?.repo ?? "");
   const [repos, setRepos]           = useState<Array<{ name: string; full_name: string; private: boolean; description: string | null }>>([]);
-  const [reposLoading, setReposLoading] = useState(false);
+  const [reposLoading, setReposLoading] = useState(true);
   const [repoSearch, setRepoSearch] = useState("");
-  const [path, setPath]             = useState("");
   const [files, setFiles]           = useState<InjectedFile[]>(savedContext?.files ?? []);
-  const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState("");
   const [activeTab, setActiveTab]   = useState<"browse" | "pinned">("browse");
 
@@ -58,7 +56,6 @@ export default function GitHubSidebar({
 
   // ── Load repo list on mount ───────────────────────────────────────────
   useEffect(() => {
-    setReposLoading(true);
     fetch("/api/github?action=repos")
       .then((r) => r.json())
       .then((data) => {
@@ -93,7 +90,6 @@ export default function GitHubSidebar({
 
   // ── Load files from a path ───────────────────────────────────────────
   async function loadDirectory(dirPath: string) {
-    setLoading(true);
     setError("");
     try {
       const res = await fetch("/api/github", {
@@ -106,8 +102,6 @@ export default function GitHubSidebar({
     } catch {
       setError("Network error");
       return [];
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -115,7 +109,7 @@ export default function GitHubSidebar({
   async function injectFile(filePath: string) {
     if (files.some((f) => f.path === filePath)) return;
     const content = await fetchFileContent(filePath);
-    if (!content) { setError("Cannot read file"); return; }
+    if (content === null) { setError("Cannot read file"); return; }
     const updated = [...files, { path: filePath, content }];
     setFiles(updated);
     onFilesChange(updated, repo);
@@ -123,12 +117,12 @@ export default function GitHubSidebar({
 
   // ── Inject entire directory ──────────────────────────────────────────
   async function injectDir(dirPath: string) {
-    setLoading(true);
+    setBrowseLoading(true);
     setError("");
 
     try {
       const items = await loadDirectory(dirPath);
-      if (!Array.isArray(items)) { setLoading(false); return; }
+      if (!Array.isArray(items)) { setBrowseLoading(false); return; }
 
       const updated: InjectedFile[] = [...files];
       const existingPaths = new Set(updated.map((f) => f.path));
@@ -141,18 +135,18 @@ export default function GitHubSidebar({
         const confirm = window.confirm(
           `This will inject up to ${fileItems.length} files (estimated ~${Math.round(fileItems.length * 500 / 1000)}K tokens). This may exceed localStorage limits. Continue with first 50 files?`
         );
-        if (!confirm) { setLoading(false); return; }
+        if (!confirm) { setBrowseLoading(false); return; }
       }
       const itemsToInject = fileItems.slice(0, 50);
 
       for (const item of itemsToInject) {
         if (existingPaths.has(item.path)) continue;
-        if (totalChars > MAX_CHARS) {
-          setError("Reached 2MB char limit — truncated.");
-          break;
-        }
         const content = await fetchFileContent(item.path);
-        if (content) {
+        if (content !== null) {
+          if (totalChars + content.length > MAX_CHARS) {
+            setError("Reached the 2 MB context limit — remaining files were skipped.");
+            break;
+          }
           updated.push({ path: item.path, content });
           existingPaths.add(item.path);
           totalChars += content.length;
@@ -167,7 +161,7 @@ export default function GitHubSidebar({
     } catch {
       setError("Error loading directory");
     } finally {
-      setLoading(false);
+      setBrowseLoading(false);
     }
   }
 
@@ -189,15 +183,15 @@ export default function GitHubSidebar({
   const [listing, setListing] = useState<Array<{ name: string; path: string; type: string }>>([]);
   const [browseLoading, setBrowseLoading] = useState(false);
 
-  const currentDir = currentPath.join("/");
-
-  async function browseDirectory(dir: string) {
+  const browseDirectory = useCallback(async (dir: string, selectedRepo = repo) => {
+    if (!selectedRepo) return;
     setBrowseLoading(true);
+    setError("");
     try {
       const res = await fetch("/api/github", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_files", repo, path: dir }),
+        body: JSON.stringify({ action: "list_files", repo: selectedRepo, path: dir }),
       });
       if (!res.ok) { setError("Cannot list directory"); return; }
       const data = await res.json();
@@ -207,17 +201,18 @@ export default function GitHubSidebar({
     } finally {
       setBrowseLoading(false);
     }
-  }
+  }, [repo]);
 
-  // Bug fix: this effect used to depend on `repo` directly, which meant every
-  // keystroke while typing "owner/repo" fired a network request via
-  // browseDirectory(). Debouncing means it only fires once typing pauses —
-  // picking a repo from the list below is unaffected (still feels instant;
-  // the delay is imperceptible for a single click that sets the full value).
   const debouncedRepo = useDebouncedValue(repo, 400);
   useEffect(() => {
-    if (debouncedRepo) browseDirectory(currentDir);
-  }, [debouncedRepo]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!/^[\w.-]+\/[\w.-]+$/.test(debouncedRepo)) return;
+    setCurrentPath([]);
+    if (debouncedRepo !== savedContext?.repo) {
+      setFiles([]);
+      onFilesChange([], debouncedRepo);
+    }
+    void browseDirectory("", debouncedRepo);
+  }, [browseDirectory, debouncedRepo, onFilesChange, savedContext?.repo]);
 
   return (
     <div className="flex flex-col h-full bg-zinc-950 light:bg-[#faf8f4]">
@@ -233,7 +228,13 @@ export default function GitHubSidebar({
           />
           {repo && (
             <button
-              onClick={() => { setRepo(""); setCurrentPath([]); setListing([]); }}
+              onClick={() => {
+                setRepo("");
+                setFiles([]);
+                setCurrentPath([]);
+                setListing([]);
+                onFilesChange([], "");
+              }}
               className="text-zinc-500 hover:text-zinc-300 light:text-[#8a7f6d] light:hover:text-[#2b2620] text-xs px-2 py-2"
               title="Change repo"
             >
@@ -416,10 +417,7 @@ export default function GitHubSidebar({
                 <span className="text-zinc-500 light:text-[#8a7f6d]">📌</span>
                 <span className="flex-1 truncate text-zinc-400 light:text-[#6b6255]">{fp}</span>
                 <button
-                  onClick={() => {
-                    injectFile(fp);
-                    onTogglePinnedFile?.(repo, fp);
-                  }}
+                  onClick={() => injectFile(fp)}
                   className="text-teal-500 hover:text-teal-400 light:text-teal-600 light:hover:text-teal-700 text-xs"
                 >
                   +

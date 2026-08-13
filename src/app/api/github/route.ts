@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { githubRequestSchema, validateOr400 } from "@/lib/validation";
+import { requireAuth } from "@/lib/auth";
 
 const GH_BASE = "https://api.github.com";
 
@@ -11,7 +12,17 @@ function ghHeaders(pat: string) {
   };
 }
 
+function contentUrl(repo: string, path: string, ref?: string): string {
+  const encodedPath = path.split("/").filter(Boolean).map(encodeURIComponent).join("/");
+  const url = new URL(`${GH_BASE}/repos/${repo}/contents${encodedPath ? `/${encodedPath}` : ""}`);
+  if (ref) url.searchParams.set("ref", ref);
+  return url.toString();
+}
+
 export async function GET(req: NextRequest) {
+  const unauthorized = requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   const pat = process.env.GITHUB_PAT;
   if (!pat) return NextResponse.json({ error: "GITHUB_PAT not set" }, { status: 500 });
 
@@ -40,6 +51,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const unauthorized = requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   const pat = process.env.GITHUB_PAT;
   if (!pat) return NextResponse.json({ error: "GITHUB_PAT not set" }, { status: 500 });
 
@@ -71,31 +85,22 @@ export async function POST(req: NextRequest) {
       const branchName = body.branchName as string;
       if (!branchName) return NextResponse.json({ error: "Missing branchName" }, { status: 400 });
 
-      // Get default branch SHA
-      const repoRes = await fetch(`${GH_BASE}/repos/${repo}/git/refs/heads/main`, { headers });
-      const defaultBranchRes = await fetch(`${GH_BASE}/repos/${repo}/git/refs/heads/master`, { headers });
-
-      let sha: string;
-      let sourceBranch: string;
-      if (repoRes.ok) {
-        const data = await repoRes.json();
-        sha = data.object.sha;
-        sourceBranch = "main";
-      } else if (defaultBranchRes.ok) {
-        const data = await defaultBranchRes.json();
-        sha = data.object.sha;
-        sourceBranch = "master";
-      } else {
-        const defaultInfo = await fetch(`${GH_BASE}/repos/${repo}`, { headers });
-        if (!defaultInfo.ok) return NextResponse.json({ error: "Cannot determine default branch" }, { status: 500 });
-        const repoData = await defaultInfo.json();
-        const defBranch = repoData.default_branch;
-        const refRes = await fetch(`${GH_BASE}/repos/${repo}/git/refs/heads/${defBranch}`, { headers });
-        if (!refRes.ok) return NextResponse.json({ error: "Cannot get default branch ref" }, { status: 500 });
-        const refData = await refRes.json();
-        sha = refData.object.sha;
-        sourceBranch = defBranch;
+      const repoInfo = await fetch(`${GH_BASE}/repos/${repo}`, { headers });
+      if (!repoInfo.ok) {
+        return NextResponse.json({ error: "Cannot determine the default branch" }, { status: 502 });
       }
+      const { default_branch: sourceBranch } = (await repoInfo.json()) as {
+        default_branch: string;
+      };
+      const refRes = await fetch(
+        `${GH_BASE}/repos/${repo}/git/ref/heads/${sourceBranch}`,
+        { headers }
+      );
+      if (!refRes.ok) {
+        return NextResponse.json({ error: "Cannot read the default branch ref" }, { status: 502 });
+      }
+      const refData = (await refRes.json()) as { object: { sha: string } };
+      const sha = refData.object.sha;
 
       const createRes = await fetch(`${GH_BASE}/repos/${repo}/git/refs`, {
         method: "POST",
@@ -117,7 +122,7 @@ export async function POST(req: NextRequest) {
     // ── List files in a directory ──────────────────────────────────────────
     if (action === "list_files") {
       const path = (body.path as string) ?? "";
-      const res = await fetch(`${GH_BASE}/repos/${repo}/contents/${encodeURI(path)}`, { headers });
+      const res = await fetch(contentUrl(repo, path), { headers });
       if (!res.ok) {
         if (res.status === 404) return NextResponse.json({ error: "Path not found" }, { status: 404 });
         return NextResponse.json({ error: `GitHub error: ${res.status}` });
@@ -134,7 +139,7 @@ export async function POST(req: NextRequest) {
     // ── Get file content ───────────────────────────────────────────────────
     if (action === "file") {
       const path = (body.path as string) ?? "";
-      const res = await fetch(`${GH_BASE}/repos/${repo}/contents/${encodeURI(path)}`, { headers });
+      const res = await fetch(contentUrl(repo, path), { headers });
       if (!res.ok) {
         if (res.status === 404) return NextResponse.json({ error: "File not found" }, { status: 404 });
         return NextResponse.json({ error: `GitHub error: ${res.status}` });
@@ -183,23 +188,31 @@ export async function POST(req: NextRequest) {
       }
       const refData = await refRes.json();
       const headSha: string = refData.object.sha;
+      const headCommitRes = await fetch(`${GH_BASE}/repos/${repo}/git/commits/${headSha}`, { headers });
+      if (!headCommitRes.ok) {
+        return NextResponse.json({ error: "Cannot read the branch head commit" }, { status: 502 });
+      }
+      const headCommit = (await headCommitRes.json()) as { tree: { sha: string } };
+      const baseTreeSha = headCommit.tree.sha;
 
       // Create blobs for files with content, handle deletions
       const treeEntries: Array<{
-        path: string; mode: "100644"; type: "blob"; sha?: string; content?: string;
+        path: string;
+        mode: "100644";
+        type: "blob";
+        sha: string | null;
       }> = [];
 
       for (const file of files) {
         if (file.content === null || file.action === "delete") {
           // Deletion: first get the file's current SHA from the tree
-          const existingRes = await fetch(`${GH_BASE}/repos/${repo}/contents/${encodeURI(file.path)}`, { headers });
+          const existingRes = await fetch(contentUrl(repo, file.path, targetBranch), { headers });
           if (existingRes.ok) {
-            const existingData = await existingRes.json();
             treeEntries.push({
               path: file.path,
               mode: "100644",
               type: "blob",
-              sha: null as unknown as string, // null SHA signals deletion
+              sha: null,
             });
           }
           // If file doesn't exist, skip it silently
@@ -241,7 +254,7 @@ export async function POST(req: NextRequest) {
         method: "POST",
         headers,
         body: JSON.stringify({
-          base_tree: headSha,
+          base_tree: baseTreeSha,
           tree: treeEntries,
         }),
       });
@@ -293,7 +306,7 @@ export async function POST(req: NextRequest) {
         success: true,
         commit: commitSha.slice(0, 7),
         branch: targetBranch,
-        files: files.filter((f) => f.content !== null || f.action !== "delete").length,
+        changedFiles: files.filter((f) => f.content !== null && f.action !== "delete").length,
         deletions: files.filter((f) => f.content === null || f.action === "delete").length,
         url: `https://github.com/${repo}/commit/${commitSha}`,
       });

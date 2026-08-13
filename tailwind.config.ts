@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import typography from "@tailwindcss/typography";
 
 const config: Config = {
   content: ["./src/**/*.{js,ts,jsx,tsx,mdx}"],
@@ -14,7 +15,7 @@ const config: Config = {
     },
   },
   plugins: [
-    require("@tailwindcss/typography"),
+    typography,
     // Adds a `light:` variant, active whenever an ancestor has class="light".
     // The app is dark-by-default (all existing unprefixed utility classes
     // ARE the dark theme, unchanged) — `light:` classes are additive

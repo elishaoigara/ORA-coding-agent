@@ -72,7 +72,7 @@ export default function PushToGitHub({ repo, files, onClose }: Props) {
       if (data.success) {
         setResult({
           success: true,
-          message: `✓ Pushed ${data.files.length} file(s) to ${data.branch} (${data.commit})`,
+          message: `✓ Pushed ${data.changedFiles + data.deletions} file(s) to ${data.branch} (${data.commit})`,
           url: data.url,
         });
       } else {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getProvider, getConfiguredProviderIds, resolveModel, type ProviderId } from "@/lib/providers";
 import { routeMessage } from "@/lib/autoRouter";
 import { chatRequestSchema, validateOr400 } from "@/lib/validation";
+import { requireAuth } from "@/lib/auth";
 
 export const maxDuration = 120;
 
@@ -15,6 +16,9 @@ function asciiSafe(s: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const unauthorized = requireAuth(req);
+  if (unauthorized) return unauthorized;
+
   let raw: unknown;
   try {
     raw = await req.json();
@@ -25,13 +29,6 @@ export async function POST(req: NextRequest) {
   const parsed = validateOr400(chatRequestSchema, raw);
   if (parsed instanceof NextResponse) return parsed;
   const { messages: rawMessages, model, provider: providerId, injectedFiles } = parsed;
-
-  // ── Password check (optional) ──────────────────────────────────────────
-  const password = req.headers.get("x-app-password") ?? "";
-  const expected = process.env.APP_PASSWORD;
-  if (expected && password !== expected) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
 
   // ── Resolve provider & model ────────────────────────────────────────────
   // Bug fix: "auto" used to fall through to getProvider("auto"), which
@@ -89,8 +86,15 @@ export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
+      let closed = false;
       function send(type: string, data: string) {
+        if (closed || req.signal.aborted) return;
         controller.enqueue(encoder.encode(`event: ${type}\ndata: ${data}\n\n`));
+      }
+      function close() {
+        if (closed) return;
+        closed = true;
+        controller.close();
       }
 
       try {
@@ -110,12 +114,13 @@ export async function POST(req: NextRequest) {
             max_tokens: 16384,
             temperature: 0.3,
           }),
+          signal: req.signal,
         });
 
         if (!res.ok) {
           const errText = await res.text();
           send("error", JSON.stringify({ error: `Provider error (${res.status}): ${errText.slice(0, 500)}` }));
-          controller.close();
+          close();
           return;
         }
 
@@ -150,10 +155,10 @@ export async function POST(req: NextRequest) {
           send("usage", JSON.stringify({ usage: usageData }));
         }
 
-        controller.close();
+        close();
       } catch (e) {
         send("error", JSON.stringify({ error: (e as Error).message }));
-        controller.close();
+        close();
       }
     },
   });

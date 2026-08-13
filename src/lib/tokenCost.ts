@@ -20,13 +20,13 @@ type PricingEntry = {
 
 const PROVIDER_PRICING: Record<string, Record<string, PricingEntry>> = {
   groq: {
-    "qwen-2.5-coder-32b":           { input: 0.79, output: 0.79 },
-    "deepseek-r1-distill-llama-70b": { input: 0.75, output: 0.99 },
-    "llama-3.3-70b-versatile":       { input: 0.59, output: 0.79 },
+    "openai/gpt-oss-120b":     { input: 0.15, output: 0.60 },
+    "openai/gpt-oss-20b":      { input: 0.075, output: 0.30 },
+    "llama-3.3-70b-versatile": { input: 0.59, output: 0.79 },
   },
   deepseek: {
-    "deepseek-chat":  { input: 0.27, output: 1.10 },
-    "deepseek-reasoner": { input: 0.14, output: 0.28 },
+    "deepseek-v4-flash": { input: 0.27, output: 1.10 },
+    "deepseek-v4-pro":   { input: 0.55, output: 2.19 },
   },
   qwen: {
     "qwen3-coder-plus": { input: 3.50, output: 7.00 },
@@ -41,11 +41,7 @@ const PROVIDER_PRICING: Record<string, Record<string, PricingEntry>> = {
     "gpt-4.1":      { input: 2.00, output: 8.00 },
   },
   openrouter: {
-    "deepseek/deepseek-chat:free":      { input: 0, output: 0 },
-    "deepseek/deepseek-r1:free":        { input: 0, output: 0 },
-    "qwen/qwen3-coder-plus:free":       { input: 0, output: 0 },
-    "qwen/qwen3-max:free":              { input: 0, output: 0 },
-    "google/gemini-2.0-flash-001:free": { input: 0, output: 0 },
+    "deepseek/deepseek-v4-flash:free": { input: 0, output: 0 },
   },
 };
 

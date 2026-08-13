@@ -1,6 +1,6 @@
 "use client";
 
-import type { AgentPlan } from "@/app/api/agent/route";
+import type { AgentPlan } from "@/lib/agent/types";
 
 interface Props {
   plan: AgentPlan;
@@ -28,7 +28,7 @@ export default function PlanApproval({ plan, task, onApprove, onReject, executin
           <span className="text-lg">📋</span>
           <div>
             <p className="text-zinc-100 light:text-[#2b2620] text-sm font-semibold">Agent Plan</p>
-            <p className="text-zinc-500 light:text-[#8a7f6d] text-xs mt-0.5 max-w-lg truncate">"{task}"</p>
+            <p className="text-zinc-500 light:text-[#8a7f6d] text-xs mt-0.5 max-w-lg truncate">&ldquo;{task}&rdquo;</p>
           </div>
         </div>
         <span className="text-xs text-zinc-500 light:text-[#8a7f6d] bg-zinc-800 light:bg-[#efe9dd] border border-zinc-700 light:border-[#ddd3bd] rounded-full px-2 py-0.5">
@@ -72,7 +72,7 @@ export default function PlanApproval({ plan, task, onApprove, onReject, executin
       {/* Action buttons */}
       <div className="px-4 py-3 border-t border-zinc-800 light:border-[#e5ded1] flex items-center justify-between">
         <p className="text-zinc-600 light:text-[#a89e8c] text-xs">
-          Approving will write these files. You'll review the actual code before pushing.
+          Approving will write these files. You&apos;ll review the actual code before pushing.
         </p>
         <div className="flex items-center gap-3">
           <button

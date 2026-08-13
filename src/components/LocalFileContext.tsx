@@ -139,7 +139,7 @@ export default function LocalFileContext({ onFilesLoaded, compact }: Props) {
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          title={loaded.length > 0 ? `${loaded.length} file(s) attached` : "Attach files or ZIP"}
+          title="Attach files or ZIP"
           className="flex items-center justify-center w-[46px] h-[46px] rounded-xl transition-colors text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 light:text-[#8a7f6d] light:hover:text-[#2b2620] light:hover:bg-[#efe9dd] relative"
         >
           {loading ? (
@@ -152,11 +152,6 @@ export default function LocalFileContext({ onFilesLoaded, compact }: Props) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
             </svg>
-          )}
-          {loaded.length > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-teal-500 text-[9px] text-white flex items-center justify-center font-bold">
-              {loaded.length}
-            </span>
           )}
         </button>
         {error && (

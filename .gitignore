@@ -1,10 +1,17 @@
-.env.local
-.env*.local
-.next/
+# Dependencies
 node_modules/
-out/
-*.tsbuildinfo
-.vercel
 
-.vercel
+# Next.js and generated output
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Local environment and deployment state
 .env*
+!.env.local.example
+.vercel/
+
+# OS/editor files
+.DS_Store
+*.swp
