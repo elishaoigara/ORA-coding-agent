@@ -141,3 +141,23 @@ Adding a provider requires updating:
 4. Deploy and verify `/api/health` after signing in.
 
 ORA sets a maximum route duration of 300 seconds for Agent mode and uses continuation batches so long tasks can resume before common serverless request limits.
+
+## Professional agent runtime
+
+ORA now uses a two-phase workflow designed for personal software work: **plan, then execute**. Planning is read-only and must inspect the repository before producing a bounded `<PLAN>` block. Execution accepts only an approved plan, re-reads target files, stages complete file contents, and rejects writes outside the approved file/action boundary.
+
+The runtime profiles each task as a feature, bugfix, refactor, test, documentation, investigation, or mixed task and assigns a low, medium, or high risk level. Every run receives a run ID and reports provider, model, task kind, risk, budget, iteration count, tool-call count, and staged-file count through the event stream. This makes long runs resumable and makes the UI’s progress truthful instead of treating every model response as a successful edit.
+
+### Personal safety controls
+
+The server applies bounded budgets to prevent runaway agent loops. The defaults are 18 iterations, 48 tool calls, and 32 file changes per run. You can override them through `AGENT_MAX_ITERATIONS`, `AGENT_MAX_TOOL_CALLS`, and `AGENT_MAX_CHANGES`; values are clamped to safe server-side ranges. The existing `AGENT_WATCHDOG_MS` controls the time budget for one request batch.
+
+The agent refuses repository traversal paths, protected `.git` and `node_modules` paths, duplicate plan entries, oversized plans, unapproved files, wrong file actions, incomplete staged content, and obvious truncation placeholders. These checks are applied both when a plan is generated and when an approved plan is executed.
+
+### Recommended workflow
+
+Start with a narrow task and let ORA inspect the repository. Review the generated plan carefully, especially for high-risk authentication, dependency, database, deployment, or destructive work. Approve only the files that should change. After execution, inspect the staged diff and run the repository checks before pushing to GitHub. If the run reaches a time or iteration boundary, use the continuation payload rather than starting over; already staged changes are preserved.
+
+### Validation
+
+The repository includes focused guardrail tests in `src/lib/agent/guardrails.test.ts` in addition to the existing workspace, SSE, validation, utility, and staged-change tests. Run `npm run check` to execute linting, strict TypeScript checking, all tests, and the production build.

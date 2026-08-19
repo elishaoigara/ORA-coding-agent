@@ -14,7 +14,14 @@ import {
   GitHubWorkspace,
   normalizeRepositoryPath,
 } from "@/lib/agent/githubWorkspace";
-import { buildExecutePrompt, PLAN_SYSTEM_PROMPT } from "@/lib/agent/prompts";
+import { buildExecutePrompt, buildPlanPrompt } from "@/lib/agent/prompts";
+import {
+  createRunId,
+  getAgentBudget,
+  profileTask,
+  summarizeBudget,
+  validatePlan,
+} from "@/lib/agent/guardrails";
 import {
   createAgentCompletion,
   ProviderRequestError,
@@ -146,7 +153,18 @@ export async function POST(request: NextRequest) {
     resumeMessages,
     resumeStagedFiles,
   } = parsed;
-  const plan: AgentPlan | undefined = phase === "execute" ? parsed.plan : undefined;
+  const runId = createRunId();
+  const profile = profileTask(task);
+  const budget = getAgentBudget();
+  const rawPlan: AgentPlan | undefined = phase === "execute" ? parsed.plan : undefined;
+  const planValidation = rawPlan ? validatePlan(rawPlan, budget) : undefined;
+  if (phase === "execute" && planValidation && !planValidation.valid) {
+    return NextResponse.json(
+      { error: "The approved plan is invalid", details: planValidation.errors },
+      { status: 400 }
+    );
+  }
+  const plan: AgentPlan | undefined = planValidation?.normalized;
 
   let provider: ProviderConfig;
   let agentModel: string;
@@ -169,6 +187,7 @@ export async function POST(request: NextRequest) {
   }
 
   const activeTools = getAgentTools(phase);
+  const taskPrompt = phase === "plan" ? buildPlanPrompt(profile) : buildExecutePrompt(plan!, profile);
   const allowedTools = new Set(activeTools.map((tool) => tool.function.name));
   const stagedFiles: StagedFile[] = resumeStagedFiles
     ? resumeStagedFiles.map((file) => ({ ...file }))
@@ -191,16 +210,14 @@ export async function POST(request: NextRequest) {
       const approvedChange = plan?.changes.find(
         (change) => normalizeRepositoryPath(change.path) === path
       );
-      if (!approvedChange) {
+      const allowed = Boolean(
+        approvedChange &&
+        (name === "delete_file" ? approvedChange.action === "delete" : approvedChange.action !== "delete")
+      );
+      if (!allowed) {
         return JSON.stringify({
-          error: `${path || "This path"} is outside the approved plan`,
+          error: `${path || "This path"} is outside the approved plan or has the wrong action`,
         });
-      }
-      if (name === "delete_file" && approvedChange.action !== "delete") {
-        return JSON.stringify({ error: `${path} was not approved for deletion` });
-      }
-      if (name === "stage_file" && approvedChange.action === "delete") {
-        return JSON.stringify({ error: `${path} was approved for deletion, not modification` });
       }
     }
 
@@ -235,29 +252,36 @@ export async function POST(request: NextRequest) {
 
       const phaseLabel = phase === "plan" ? "Analysing codebase" : "Executing plan";
       send("meta", {
+        runId,
         provider: provider.id,
         model: agentModel,
         reason: routeReason,
         branch: branch ?? null,
+        taskKind: profile.kind,
+        risk: profile.risk,
+        budget: summarizeBudget(budget),
       });
       send("progress", {
         text: `${phaseLabel} on ${repo}${branch ? ` (${branch})` : ""} using ${provider.name} / ${agentModel}${ELLIPSIS}`,
       });
 
-      const systemPrompt = phase === "plan"
-        ? PLAN_SYSTEM_PROMPT
-        : buildExecutePrompt(plan!);
+      const systemPrompt = taskPrompt;
       const messages: AgentMessage[] = resumeMessages?.length
         ? resumeMessages.map((message) => ({ ...message }))
         : [{ role: "user", content: task }];
       const startedAt = Date.now();
       let iterations = 0;
+      let toolCallsUsed = 0;
       let textWasSent = false;
       let consecutiveEmptyResponses = 0;
       let planWasSent = false;
 
       try {
-        while (iterations < MAX_ITERATIONS_PER_REQUEST && !request.signal.aborted) {
+        while (
+          iterations < Math.min(MAX_ITERATIONS_PER_REQUEST, budget.maxIterations) &&
+          toolCallsUsed < budget.maxToolCalls &&
+          !request.signal.aborted
+        ) {
           const missing = getMissingChanges(plan?.changes, stagedFiles);
           if (Date.now() - startedAt >= requestBudgetMs) {
             if (phase === "execute" && missing.length > 0) {
@@ -356,6 +380,8 @@ export async function POST(request: NextRequest) {
           if (toolCalls.length > 0) {
             consecutiveEmptyResponses = 0;
             for (const [index, toolCall] of toolCalls.entries()) {
+              if (toolCallsUsed >= budget.maxToolCalls) break;
+              toolCallsUsed += 1;
               const name = toolCall.function?.name ?? "unknown";
               const id = toolCall.id || `tool_${Date.now()}_${index}`;
               const args = parseToolArguments(toolCall.function?.arguments);
@@ -398,7 +424,15 @@ export async function POST(request: NextRequest) {
               textWasSent = true;
             }
             if (parsedPlan.plan) {
-              send("plan", { plan: parsedPlan.plan });
+              const checked = validatePlan(parsedPlan.plan, budget);
+              if (!checked.valid) {
+                messages.push({
+                  role: "user",
+                  content: `The proposed plan failed guardrails: ${checked.errors.join(" ")} Return a corrected <PLAN> block.`,
+                });
+                continue;
+              }
+              send("plan", { plan: checked.normalized });
               planWasSent = true;
               break;
             }
@@ -461,7 +495,16 @@ export async function POST(request: NextRequest) {
         if (phase === "execute" && stagedFiles.length > 0) {
           send("staged", { files: stagedFiles });
         }
-        send("done", { iterations, phase, stagedCount: stagedFiles.length });
+        send("done", {
+          runId,
+          iterations,
+          toolCalls: toolCallsUsed,
+          phase,
+          taskKind: profile.kind,
+          risk: profile.risk,
+          stagedCount: stagedFiles.length,
+          status: request.signal.aborted ? "paused" : "completed",
+        });
         close();
       } catch (error) {
         send("error", {

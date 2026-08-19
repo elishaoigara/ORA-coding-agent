@@ -1,6 +1,9 @@
 import type { Tool } from "@/types";
 
 export type AgentPhase = "plan" | "execute";
+export type AgentRunStatus = "queued" | "running" | "awaiting_approval" | "completed" | "paused" | "failed";
+export type AgentTaskKind = "feature" | "bugfix" | "refactor" | "test" | "documentation" | "investigation" | "mixed";
+export type AgentRisk = "low" | "medium" | "high";
 export type FileAction = "create" | "modify" | "delete";
 
 export interface AgentPlanChange {
@@ -11,6 +14,12 @@ export interface AgentPlanChange {
 }
 
 export interface AgentPlan {
+  id?: string;
+  version?: 1;
+  validation?: {
+    checks: string[];
+    filesReviewed: string[];
+  };
   summary: string;
   approach: string;
   changes: AgentPlanChange[];
@@ -55,6 +64,23 @@ export interface AgentCompletionRequest {
   messages: AgentMessage[];
   tools: Tool[];
   forceText?: boolean;
+}
+
+export interface AgentRunBudget {
+  maxIterations: number;
+  maxToolCalls: number;
+  maxChanges: number;
+}
+
+export interface AgentRunSummary {
+  runId: string;
+  phase: AgentPhase;
+  status: AgentRunStatus;
+  taskKind: AgentTaskKind;
+  risk: AgentRisk;
+  iterations: number;
+  toolCalls: number;
+  stagedCount: number;
 }
 
 export interface AgentContinuation {
