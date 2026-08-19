@@ -1020,3 +1020,109 @@ html:not(.light) body {
   .ora-github-rail.open { min-width: min(88vw, 360px) !important; }
   .ora-canvas { width: 100%; }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   ORA V1 WORKSPACE RUNTIME / TERMINAL
+   ────────────────────────────────────────────────────────────────────────── */
+.workspace-tool-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  color: #71809a;
+  border: 1px solid transparent;
+  transition: .16s ease;
+}
+.workspace-tool-toggle:hover,
+.workspace-tool-toggle.is-active {
+  color: var(--ora-cyan);
+  background: rgba(72, 230, 209, .09);
+  border-color: rgba(72, 230, 209, .28);
+  box-shadow: 0 0 18px rgba(72, 230, 209, .08);
+}
+.workspace-tool-toggle__glyph { font: 18px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.terminal-dock {
+  flex-shrink: 0;
+  max-height: min(420px, 46dvh);
+  overflow: auto;
+  border-top: 1px solid rgba(72, 230, 209, .2);
+  background: rgba(7, 11, 20, .94);
+}
+
+.terminal-panel {
+  width: min(980px, 100%);
+  margin: 0 auto;
+  color: #cbd6e8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.terminal-panel__header,
+.terminal-panel__toolbar,
+.terminal-panel__input {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.terminal-panel__header {
+  justify-content: space-between;
+  padding: 12px 18px 10px;
+  border-bottom: 1px solid rgba(139, 157, 190, .12);
+}
+.terminal-panel__eyebrow { color: var(--ora-cyan); font-size: 9px; letter-spacing: .14em; }
+.terminal-panel h2 { margin: 4px 0 0; color: #eef5ff; font: 600 14px/1.1 Inter, ui-sans-serif, sans-serif; }
+.terminal-panel__header-actions { display: flex; align-items: center; gap: 12px; }
+.terminal-panel__status { color: #5d6880; font-size: 9px; letter-spacing: .12em; }
+.terminal-panel__status.is-connected { color: var(--ora-cyan); text-shadow: 0 0 10px rgba(72, 230, 209, .5); }
+.terminal-panel__close { color: #637088; font-size: 21px; line-height: 1; }
+.terminal-panel__close:hover { color: #f08cff; }
+
+.terminal-panel__connect { display: flex; align-items: center; gap: 14px; padding: 18px; }
+.terminal-panel__connect-icon { color: var(--ora-violet); font-size: 22px; }
+.terminal-panel__connect p { flex: 1; margin: 0; color: #8290a8; font: 12px/1.5 Inter, ui-sans-serif, sans-serif; }
+.terminal-panel__connect strong { color: #dce6f6; font-weight: 600; }
+.terminal-panel__primary,
+.terminal-panel__action,
+.terminal-panel__input button {
+  border: 1px solid rgba(72, 230, 209, .28);
+  border-radius: 8px;
+  padding: 8px 11px;
+  color: var(--ora-cyan);
+  background: rgba(72, 230, 209, .08);
+  font: 600 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .09em;
+  white-space: nowrap;
+}
+.terminal-panel__primary:hover,
+.terminal-panel__action:hover:not(:disabled),
+.terminal-panel__input button:hover:not(:disabled) { background: rgba(72, 230, 209, .16); border-color: var(--ora-cyan); }
+.terminal-panel__primary:disabled,
+.terminal-panel__action:disabled,
+.terminal-panel__input button:disabled { opacity: .4; cursor: not-allowed; }
+.terminal-panel__action--danger { color: #ff8dad; border-color: rgba(255, 109, 157, .24); background: rgba(255, 109, 157, .06); }
+.terminal-panel__action--danger:hover { border-color: #ff6d9d; background: rgba(255, 109, 157, .12); }
+.terminal-panel__toolbar { padding: 9px 18px; border-bottom: 1px solid rgba(139, 157, 190, .1); }
+.terminal-panel__verification { margin-left: auto; color: #ff9abb; font-size: 9px; letter-spacing: .1em; }
+.terminal-panel__verification.is-passed { color: var(--ora-cyan); }
+.terminal-panel__output { max-height: 210px; min-height: 110px; overflow: auto; padding: 10px 18px; background: rgba(4, 7, 13, .62); }
+.terminal-panel__empty { padding: 18px 0; color: #56657d; font-size: 10px; }
+.terminal-line { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 10px; padding: 2px 0; font-size: 10px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.terminal-line__time { color: #46536a; }
+.terminal-line__text { color: #a9b6ca; }
+.terminal-line--stderr .terminal-line__text { color: #ff9abb; }
+.terminal-line--result .terminal-line__text { color: var(--ora-cyan); }
+.terminal-line--system .terminal-line__text { color: #b8aaff; }
+.terminal-panel__input { padding: 10px 18px 13px; border-top: 1px solid rgba(139, 157, 190, .1); }
+.terminal-panel__prompt { color: var(--ora-cyan); }
+.terminal-panel__input input { flex: 1; min-width: 0; border: 0; outline: 0; color: #e8edf7; background: transparent; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.terminal-panel__input input::placeholder { color: #4f5c72; }
+
+@media (max-width: 767px) {
+  .terminal-dock { max-height: 52dvh; }
+  .terminal-panel__header, .terminal-panel__toolbar, .terminal-panel__input, .terminal-panel__output { padding-left: 11px; padding-right: 11px; }
+  .terminal-panel__connect { flex-wrap: wrap; padding: 14px 11px; }
+  .terminal-panel__connect p { min-width: calc(100% - 48px); }
+  .terminal-panel__primary { margin-left: 37px; }
+  .terminal-line { grid-template-columns: 52px minmax(0, 1fr); font-size: 9px; }
+}

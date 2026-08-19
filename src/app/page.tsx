@@ -10,6 +10,7 @@ import LocalFileContext from "@/components/LocalFileContext";
 import ArtifactPanel, { type Artifact } from "@/components/ArtifactPanel";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import AgentExecutionConsole, { type ExecutionLogEntry } from "@/components/AgentExecutionConsole";
+import TerminalPanel from "@/components/TerminalPanel";
 import AuthGate from "@/components/AuthGate";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
@@ -139,6 +140,7 @@ function Workspace() {
   const [selectedModel, setSelectedModel] = useState("");
   const [showHistory, setShowHistory]     = useState(false);
   const [showGitHub, setShowGitHub]       = useState(false);
+  const [showTerminal, setShowTerminal]   = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [projectInput, setProjectInput]   = useState("");
 
@@ -747,7 +749,7 @@ function Workspace() {
   }
 
   const closeAll = useCallback(() => {
-    setShowHistory(false); setShowGitHub(false); setShowModelPicker(false);
+    setShowHistory(false); setShowGitHub(false); setShowModelPicker(false); setShowTerminal(false);
   }, []);
 
   useEffect(() => { closeAll(); }, [activeId, closeAll]);
@@ -779,7 +781,7 @@ function Workspace() {
           and the model picker is a small anchored dropdown, so a full-screen
           dimmed backdrop has nothing to justify and would otherwise cover the
           whole app and swallow every click until manually dismissed. */}
-      {(showHistory || showGitHub || showModelPicker) && (
+      {(showHistory || showGitHub || showModelPicker || showTerminal) && (
         <div className="mobile-overlay md:hidden" onClick={closeAll} />
       )}
 
@@ -880,6 +882,14 @@ function Workspace() {
               </button>
             )}
 
+            <button
+              onClick={() => setShowTerminal((v) => !v)}
+              className={`workspace-tool-toggle touch-target ${showTerminal ? "is-active" : ""}`}
+              aria-label="Terminal"
+              title="Terminal workspace"
+            >
+              <span className="workspace-tool-toggle__glyph">⌘</span>
+            </button>
             <button
               onClick={() => setShowGitHub((v) => !v)}
               className={`touch-target rounded-lg transition-colors ${
@@ -1103,6 +1113,12 @@ function Workspace() {
 
           <div ref={bottomRef} />
         </div>
+
+        {showTerminal && activeRepo && (
+          <div className="terminal-dock">
+            <TerminalPanel repo={activeRepo} branch={agentBranch || undefined} onClose={() => setShowTerminal(false)} />
+          </div>
+        )}
 
         {/* ── Staged changes ────────────────────────────────────────────── */}
         {stagedFiles.length > 0 && (

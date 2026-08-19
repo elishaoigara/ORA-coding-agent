@@ -161,3 +161,14 @@ Start with a narrow task and let ORA inspect the repository. Review the generate
 ### Validation
 
 The repository includes focused guardrail tests in `src/lib/agent/guardrails.test.ts` in addition to the existing workspace, SSE, validation, utility, and staged-change tests. Run `npm run check` to execute linting, strict TypeScript checking, all tests, and the production build.
+
+
+## ORA v1 Phase 1: Workspace Runtime
+
+ORA now includes a guarded terminal workspace for connected GitHub repositories. Open a repository, select the terminal control in the top bar, and start a workspace. ORA creates an ephemeral repository checkout, streams command output into the terminal panel, and supports a standard verification pipeline.
+
+The verification pipeline runs available package scripts in this order: `lint`, `typecheck`, `test`, and `build`. It stops on the first failure so the agent can inspect the actual output and repair the smallest safe cause before re-running verification.
+
+Terminal commands are subject to safety checks. Recursive force deletion, privilege escalation, remote-script piping, destructive system commands, destructive database operations, and direct remote Git mutation are blocked. Git pushes and pull requests should continue to use the explicit GitHub workflow with user confirmation.
+
+Terminal sessions are currently **ephemeral and process-scoped**. They are intended for personal development sessions and may be lost when a serverless instance is recycled. A future persistent-compute phase can move workspace state to a durable worker or connected local runtime without changing the UI contract.
