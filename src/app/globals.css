@@ -296,3 +296,238 @@ input, textarea, select {
     scroll-behavior: auto !important;
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   ORA FUTURE WORKSPACE
+   A contained command-center surface for the coding agent.
+   ────────────────────────────────────────────────────────────────────────── */
+:root {
+  --ora-ink: #e8edf7;
+  --ora-muted: #8793aa;
+  --ora-dim: #5d6880;
+  --ora-bg: #080b13;
+  --ora-surface: #0d1220;
+  --ora-surface-raised: #11182a;
+  --ora-line: rgba(139, 157, 190, 0.16);
+  --ora-cyan: #48e6d1;
+  --ora-violet: #9b8cff;
+  --ora-pink: #f08cff;
+}
+
+html:not(.light) body {
+  background: radial-gradient(circle at 50% -20%, rgba(103, 77, 255, 0.16), transparent 42%), var(--ora-bg);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.ora-shell {
+  position: relative;
+  isolation: isolate;
+  background-image: linear-gradient(rgba(111, 132, 181, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(111, 132, 181, 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.ora-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, transparent 35%, rgba(0, 0, 0, 0.28));
+  z-index: -1;
+}
+
+.ora-rail {
+  position: relative;
+  z-index: 20;
+  background: rgba(9, 13, 23, 0.86) !important;
+  border-color: var(--ora-line) !important;
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.ora-rail > div:first-child,
+.ora-topbar {
+  border-color: var(--ora-line) !important;
+}
+
+.ora-rail .text-zinc-100,
+.ora-rail .text-zinc-300,
+.ora-topbar .text-zinc-300 { color: var(--ora-ink) !important; }
+.ora-rail .text-zinc-500,
+.ora-topbar .text-zinc-500 { color: var(--ora-muted) !important; }
+
+.ora-workspace {
+  position: relative;
+  z-index: 10;
+  background: rgba(8, 11, 19, 0.56);
+}
+
+.ora-topbar {
+  position: relative;
+  z-index: 30;
+  min-height: 64px;
+  background: rgba(9, 13, 23, 0.76) !important;
+}
+
+.ora-topbar > span {
+  font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: 0.02em;
+}
+
+.ora-model-trigger {
+  border-color: rgba(72, 230, 209, 0.32) !important;
+  background: linear-gradient(135deg, rgba(72, 230, 209, 0.12), rgba(155, 140, 255, 0.14)) !important;
+  color: var(--ora-ink) !important;
+  box-shadow: 0 0 0 1px rgba(72, 230, 209, 0.06), 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.ora-model-trigger:hover,
+.ora-model-trigger:focus-visible {
+  border-color: var(--ora-cyan) !important;
+  box-shadow: 0 0 0 3px rgba(72, 230, 209, 0.12), 0 8px 30px rgba(0, 0, 0, 0.24);
+}
+
+.model-command-panel {
+  position: fixed;
+  z-index: 1000 !important;
+  isolation: isolate;
+  overflow: hidden;
+  background: rgba(13, 18, 32, 0.98) !important;
+  border-color: rgba(139, 157, 190, 0.24) !important;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.58), 0 0 0 1px rgba(155, 140, 255, 0.12), 0 0 48px rgba(72, 230, 209, 0.08);
+}
+
+.model-command-header {
+  background: linear-gradient(135deg, rgba(17, 24, 42, 0.99), rgba(13, 18, 32, 0.99)) !important;
+}
+
+.model-command-header::before {
+  content: "MODEL ROUTER";
+  margin-right: auto;
+  color: var(--ora-cyan);
+  font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.14em;
+}
+
+.model-command-header > span { display: none; }
+.model-command-list { max-height: 390px; scrollbar-gutter: stable; }
+
+.model-group-label {
+  color: var(--ora-dim) !important;
+  font: 600 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.13em;
+}
+
+.model-option {
+  color: #b8c2d6 !important;
+  border: 1px solid transparent;
+}
+
+.model-option:hover:not(:disabled),
+.model-option:focus-visible {
+  background: rgba(72, 230, 209, 0.08) !important;
+  border-color: rgba(72, 230, 209, 0.24) !important;
+  color: #f1f5ff !important;
+  outline: none;
+}
+
+.model-option[class*="bg-violet"] {
+  background: linear-gradient(100deg, rgba(155, 140, 255, 0.22), rgba(72, 230, 209, 0.09)) !important;
+  border-color: rgba(155, 140, 255, 0.48) !important;
+  color: #f3efff !important;
+}
+
+.model-command-panel .input-field {
+  background: rgba(6, 9, 16, 0.72) !important;
+  border-color: rgba(139, 157, 190, 0.22) !important;
+}
+.model-command-panel .border-t { border-color: var(--ora-line) !important; }
+
+.ora-empty-state { position: relative; max-width: 720px; margin: 0 auto; }
+
+.ora-kicker {
+  margin-bottom: 9px;
+  color: var(--ora-cyan);
+  font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.18em;
+}
+
+.ora-title {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.08em;
+  text-shadow: 0 0 34px rgba(155, 140, 255, 0.32);
+}
+
+.ora-orb {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  margin: 0 auto 18px;
+  border: 1px solid rgba(72, 230, 209, 0.62);
+  border-radius: 20px;
+  transform: rotate(45deg);
+  background: linear-gradient(135deg, rgba(72, 230, 209, 0.18), rgba(155, 140, 255, 0.18));
+  box-shadow: 0 0 0 7px rgba(72, 230, 209, 0.035), 0 0 44px rgba(72, 230, 209, 0.18), inset 0 0 24px rgba(155, 140, 255, 0.2);
+}
+
+.ora-orb span {
+  position: absolute;
+  inset: 14px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--ora-cyan), var(--ora-violet));
+  box-shadow: 0 0 20px rgba(72, 230, 209, 0.66);
+}
+
+.ora-status-pill {
+  border-color: rgba(72, 230, 209, 0.24) !important;
+  background: rgba(72, 230, 209, 0.06) !important;
+  color: #a9b8cd !important;
+}
+.ora-status-pill > span:first-child { background: var(--ora-cyan) !important; box-shadow: 0 0 10px var(--ora-cyan); }
+
+.ora-prompt-chip {
+  min-height: 74px;
+  border-color: rgba(139, 157, 190, 0.16) !important;
+  background: rgba(13, 18, 32, 0.74) !important;
+  color: #9eabc1 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+}
+
+.ora-prompt-chip:hover {
+  border-color: rgba(72, 230, 209, 0.32) !important;
+  background: rgba(17, 28, 43, 0.94) !important;
+  color: #eef5ff !important;
+  transform: translateY(-2px);
+}
+
+.ora-composer {
+  position: relative;
+  z-index: 15;
+  background: rgba(9, 13, 23, 0.86) !important;
+  border-color: var(--ora-line) !important;
+}
+
+.ora-composer .input-field {
+  border-color: rgba(139, 157, 190, 0.23) !important;
+  background: rgba(13, 18, 32, 0.9) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.025);
+}
+
+.ora-composer .input-field:focus {
+  border-color: var(--ora-cyan) !important;
+  box-shadow: 0 0 0 3px rgba(72, 230, 209, 0.1), 0 0 28px rgba(72, 230, 209, 0.08);
+}
+
+.ora-github-rail { min-width: 320px; }
+
+@media (max-width: 767px) {
+  .ora-topbar { min-height: 58px; }
+  .model-command-panel { inset: auto 12px 12px; width: auto; max-height: 82dvh; }
+  .model-command-list { max-height: 48dvh; }
+  .ora-github-rail { min-width: 0; }
+  .ora-empty-state { padding-top: 10vh; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ora-orb, .ora-prompt-chip { transition: none !important; transform: none !important; }
+}

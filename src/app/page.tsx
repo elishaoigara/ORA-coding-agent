@@ -741,7 +741,7 @@ function Workspace() {
 
   return (
     <ErrorBoundary>
-    <div className="flex h-dvh bg-zinc-950 light:bg-[#f8f5f0] overflow-hidden">
+    <div className="ora-shell flex h-dvh bg-zinc-950 light:bg-[#f8f5f0] overflow-hidden">
 
       {/* ── Backdrop ─────────────────────────────────────────────────────── */}
       {/* md:hidden: on desktop the sidebars are permanently docked (md:visible)
@@ -753,7 +753,7 @@ function Workspace() {
       )}
 
       {/* ── History sidebar ───────────────────────────────────────────────── */}
-      <div className={`sidebar-left ${showHistory ? "open" : ""} md:static md:transform-none md:visible md:w-60 md:flex md:flex-col md:border-r md:border-zinc-800 light:md:border-[#e5ded1] md:bg-transparent`}>
+      <div className={`sidebar-left ora-rail ora-history-rail ${showHistory ? "open" : ""} md:static md:transform-none md:visible md:w-64 md:flex md:flex-col md:border-r md:border-zinc-800 light:md:border-[#e5ded1] md:bg-transparent`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1] flex-shrink-0">
           <span className="text-zinc-100 light:text-[#2b2620] text-sm font-semibold tracking-tight">History</span>
           <div className="flex items-center gap-1">
@@ -780,10 +780,10 @@ function Workspace() {
       </div>
 
       {/* ── Main area ─────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="ora-workspace flex-1 flex flex-col min-w-0">
 
         {/* ── Top bar ───────────────────────────────────────────────────── */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 light:border-[#e5ded1] bg-zinc-900/90 light:bg-white/90 backdrop-blur-sm flex-shrink-0">
+        <div className="ora-topbar flex items-center gap-2 px-3 md:px-5 py-2.5 border-b border-zinc-800 light:border-[#e5ded1] bg-zinc-900/90 light:bg-white/90 backdrop-blur-sm flex-shrink-0">
           {/* Left: menu + title */}
           <button
             onClick={() => setShowHistory((v) => !v)}
@@ -808,7 +808,7 @@ function Workspace() {
 
             <button
               onClick={() => setShowModelPicker((v) => !v)}
-              className="model-pill"
+              className="model-pill ora-model-trigger"
               aria-label="Select model"
               title={`${providerLabel} · ${modelLabel}`}
             >
@@ -894,18 +894,18 @@ function Workspace() {
 
         {/* ── Model picker dropdown ─────────────────────────────────────── */}
         {showModelPicker && (
-          <div className="bottom-sheet md:absolute md:top-14 md:left-auto md:right-3 md:bottom-auto md:max-h-[500px] md:w-80 md:border md:border-zinc-700 light:md:border-[#e5ded1] md:rounded-xl md:shadow-2xl">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1] sticky top-0 bg-zinc-900 light:bg-white z-10">
+          <div className="model-command-panel bottom-sheet md:absolute md:top-16 md:left-auto md:right-4 md:bottom-auto md:max-h-[min(680px,calc(100dvh-96px))] md:w-[min(390px,calc(100vw-32px))] md:border md:border-zinc-700 light:md:border-[#e5ded1] md:rounded-2xl md:shadow-2xl">
+            <div className="model-command-header flex items-center justify-between px-5 py-4 border-b border-zinc-800 light:border-[#e5ded1] sticky top-0 bg-zinc-900 light:bg-white z-10">
               <span className="text-zinc-100 light:text-[#2b2620] text-sm font-semibold">Model</span>
               <button onClick={() => setShowModelPicker(false)} className="touch-target text-zinc-500 hover:text-zinc-200 light:text-[#8a7f6d] light:hover:text-[#2b2620]">
                 <IconX />
               </button>
             </div>
-            <div className="p-3 space-y-1 overflow-y-auto">
+            <div className="model-command-list p-3 space-y-1 overflow-y-auto">
               {/* Auto option */}
               <button
                 onClick={() => { handleProviderChange("auto"); setShowModelPicker(false); }}
-                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                className={`model-option w-full text-left px-3 py-3 rounded-xl text-sm transition-colors ${
                   selectedProviderId === "auto"
                     ? "bg-violet-800/40 text-violet-200 border border-violet-700/50"
                     : "text-zinc-300 hover:bg-zinc-800 light:text-[#4a4335] light:hover:bg-[#efe9dd]"
@@ -917,7 +917,7 @@ function Workspace() {
 
               {providers.map((p) => (
                 <div key={p.id}>
-                  <div className="px-3 pt-3 pb-1 text-xs text-zinc-600 light:text-[#a89e8c] font-medium uppercase tracking-wider">
+                  <div className="model-group-label px-3 pt-4 pb-2 text-xs text-zinc-600 light:text-[#a89e8c] font-medium uppercase tracking-wider">
                     {p.name} {!p.configured && <span className="text-zinc-700 light:text-[#c7bda8]">(not configured)</span>}
                   </div>
                   {p.models.map((m) => {
@@ -934,7 +934,7 @@ function Workspace() {
                           setSelectedModel(m.id);
                           setShowModelPicker(false);
                         }}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
+                        className={`model-option w-full text-left px-3 py-3 rounded-xl text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
                           selectedProviderId === p.id && selectedModel === m.id
                             ? "bg-violet-800/40 text-violet-200 border border-violet-700/50"
                             : "text-zinc-300 hover:bg-zinc-800 light:text-[#4a4335] light:hover:bg-[#efe9dd]"
@@ -990,17 +990,21 @@ function Workspace() {
         {/* ── Messages ─────────────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto px-3 md:px-6 py-4 space-y-4 mobile-scroll">
           {messages.length === 0 && !loading && (
-            <div className="flex flex-col items-center justify-center h-full text-center px-4 gap-4 py-8">
+            <div className="ora-empty-state flex flex-col items-center justify-center h-full text-center px-4 gap-5 py-8">
               {/* Hero — smaller on mobile */}
               <div>
-                <h1 className="text-4xl font-extrabold text-zinc-100 light:text-[#2b2620] tracking-tight">ORA</h1>
+                <div className="ora-orb" aria-hidden="true"><span /></div>
+                <div>
+                  <div className="ora-kicker">PERSONAL CODING SYSTEM · ONLINE</div>
+                  <h1 className="ora-title text-4xl font-extrabold text-zinc-100 light:text-[#2b2620] tracking-tight">ORA</h1>
                 <p className="text-zinc-500 light:text-[#8a7f6d] text-sm mt-1">
                   {agentMode ? "Agent mode — connect a repo to begin" : "Your AI coding agent"}
                 </p>
+                </div>
               </div>
 
               {/* Model pill */}
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 light:bg-white border border-zinc-800 light:border-[#e5ded1] rounded-full text-xs text-zinc-500 light:text-[#8a7f6d]">
+              <div className="ora-status-pill flex items-center gap-2 px-3 py-1.5 bg-zinc-900 light:bg-white border border-zinc-800 light:border-[#e5ded1] rounded-full text-xs text-zinc-500 light:text-[#8a7f6d]">
                 <span className="w-1.5 h-1.5 rounded-full bg-teal-500 flex-shrink-0" />
                 <span className="truncate max-w-[180px]">{providerLabel} · {modelLabel}</span>
               </div>
@@ -1011,7 +1015,7 @@ function Workspace() {
                   <button
                     key={i}
                     onClick={() => sendMessage(prompt)}
-                    className="text-left text-xs text-zinc-400 light:text-[#6b6255] bg-zinc-900/80 light:bg-white border border-zinc-800 light:border-[#e5ded1] rounded-2xl p-3 hover:bg-zinc-800 hover:border-zinc-700 hover:text-zinc-200 light:hover:bg-[#efe9dd] light:hover:border-[#ddd3bd] light:hover:text-[#2b2620] active:scale-95 transition-all leading-relaxed"
+                    className="ora-prompt-chip text-left text-xs text-zinc-400 light:text-[#6b6255] bg-zinc-900/80 light:bg-white border border-zinc-800 light:border-[#e5ded1] rounded-2xl p-3 hover:bg-zinc-800 hover:border-zinc-700 hover:text-zinc-200 light:hover:bg-[#efe9dd] light:hover:border-[#ddd3bd] light:hover:text-[#2b2620] active:scale-95 transition-all leading-relaxed"
                   >
                     {prompt}
                   </button>
@@ -1094,7 +1098,7 @@ function Workspace() {
 
         {/* ── Input bar ─────────────────────────────────────────────────── */}
         <div
-          className="border-t border-zinc-800 light:border-[#e5ded1] bg-zinc-900/90 light:bg-white/90 backdrop-blur-sm flex-shrink-0"
+          className="ora-composer border-t border-zinc-800 light:border-[#e5ded1] bg-zinc-900/90 light:bg-white/90 backdrop-blur-sm flex-shrink-0"
           style={{ paddingBottom: kbHeight > 0 ? kbHeight : undefined }}
         >
           <div className="px-3 md:px-4 py-2.5 pb-safe">
@@ -1220,7 +1224,7 @@ function Workspace() {
       )}
 
       {/* ── GitHub sidebar ────────────────────────────────────────────────── */}
-      <div className={`sidebar-right ${showGitHub ? "open" : ""} md:static md:transform-none md:visible md:w-72 md:flex md:flex-col md:border-l md:border-zinc-800 light:md:border-[#e5ded1] md:bg-transparent`}>
+      <div className={`sidebar-right ora-rail ora-github-rail ${showGitHub ? "open" : ""} md:static md:transform-none md:visible md:w-80 md:flex md:flex-col md:border-l md:border-zinc-800 light:md:border-[#e5ded1] md:bg-transparent`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1] flex-shrink-0">
           <span className="text-zinc-100 light:text-[#2b2620] text-sm font-semibold">GitHub</span>
           <button onClick={() => setShowGitHub(false)} className="touch-target text-zinc-500 hover:text-zinc-200 light:text-[#8a7f6d] light:hover:text-[#2b2620]">
