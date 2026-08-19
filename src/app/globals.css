@@ -744,3 +744,24 @@ html:not(.light) body {
   .ora-shell .ora-history-rail,
   .ora-shell .ora-github-rail { box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5); }
 }
+
+/* Direct inner-rail overrides: legacy light utility classes must not split the shell. */
+.light .ora-shell .ora-rail > div {
+  background-color: var(--ora-panel) !important;
+  color: var(--ora-copy) !important;
+}
+
+.light .ora-shell .ora-rail input,
+.light .ora-shell .ora-rail textarea,
+.light .ora-shell .ora-rail select {
+  background-color: var(--ora-panel-raised) !important;
+  border-color: var(--ora-border) !important;
+  color: var(--ora-copy) !important;
+}
+
+.light .ora-shell .ora-rail input::placeholder,
+.light .ora-shell .ora-rail textarea::placeholder { color: #637088 !important; }
+
+.light .ora-shell .ora-rail .h-1\.5 { background-color: #1a2436 !important; }
+.light .ora-shell .ora-rail [class*="bg-white"],
+.light .ora-shell .ora-rail [class*="bg-\\[\\#"] { background-color: var(--ora-panel) !important; }
