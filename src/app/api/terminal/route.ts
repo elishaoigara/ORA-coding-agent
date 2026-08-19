@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth";
 import {
   createTerminalSession,
   executeTerminalCommand,
+  applyWorkspacePatches,
   getTerminalSession,
   listVerificationSteps,
   runVerification,
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
     return session ? Response.json({ session: { ...session, process: undefined } }) : Response.json({ error: "Session not found" }, { status: 404 });
   }
 
-  if (!["start", "exec", "verify"].includes(action)) {
+  if (!["start", "exec", "verify", "apply"].includes(action)) {
     return Response.json({ error: "Unsupported terminal action" }, { status: 400 });
   }
 
@@ -68,6 +69,11 @@ export async function POST(request: NextRequest) {
           const command = typeof body.command === "string" ? body.command : "";
           const exitCode = await executeTerminalCommand(sessionId, command, onEvent);
           send("command_done", { exitCode });
+        } else if (action === "apply") {
+          if (!sessionId) throw new Error("sessionId is required");
+          const patches = Array.isArray(body.patches) ? body.patches : [];
+          const applied = await applyWorkspacePatches(sessionId, patches as Array<{ path: string; content: string; action?: "create" | "modify" | "delete" }>, onEvent);
+          send("patches_applied", { applied });
         } else {
           if (!sessionId) throw new Error("sessionId is required");
           const result = await runVerification(sessionId, onEvent);

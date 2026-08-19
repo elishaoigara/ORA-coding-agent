@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 
@@ -185,6 +185,41 @@ export async function executeTerminalCommand(id: string, input: string, onEvent:
   session.lastActivityAt = now();
   emit(onEvent, "system", `$ ${input}`, { command: input });
   return runProcess(session, "bash", ["-lc", input], onEvent);
+}
+
+export interface WorkspacePatch { path: string; content: string; action?: "create" | "modify" | "delete"; }
+
+function safeWorkspacePath(cwd: string, filePath: string): string {
+  const normalized = path.posix.normalize(`/${filePath}`).replace(/^\/+/, "");
+  if (!normalized || normalized.startsWith("..") || normalized.includes("/../") || normalized.startsWith(".git/")) {
+    throw new Error(`Unsafe workspace path: ${filePath}`);
+  }
+  return path.join(cwd, normalized);
+}
+
+export async function applyWorkspacePatches(id: string, patches: WorkspacePatch[], onEvent: (event: TerminalEvent) => void): Promise<number> {
+  const session = sessions.get(id);
+  if (!session) throw new Error("Terminal session not found or expired");
+  if (session.process) throw new Error("Stop the active command before applying patches");
+  if (!Array.isArray(patches) || patches.length === 0) throw new Error("At least one patch is required");
+  if (patches.length > 32) throw new Error("A repair batch cannot modify more than 32 files");
+  const seen = new Set<string>();
+  for (const patch of patches) {
+    if (!patch || typeof patch.path !== "string" || seen.has(patch.path)) throw new Error("Repair batch contains an invalid or duplicate path");
+    seen.add(patch.path);
+    const target = safeWorkspacePath(session.cwd, patch.path);
+    if (patch.action === "delete") {
+      await rm(target, { force: true });
+      emit(onEvent, "system", `Deleted ${patch.path}`);
+    } else {
+      if (typeof patch.content !== "string" || patch.content.length > 2_000_000) throw new Error(`Invalid content for ${patch.path}`);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, patch.content, "utf8");
+      emit(onEvent, "system", `Applied ${patch.path}`);
+    }
+  }
+  session.lastActivityAt = now();
+  return patches.length;
 }
 
 export async function runVerification(id: string, onEvent: (event: TerminalEvent) => void): Promise<{ passed: boolean; steps: Array<VerificationStep & { exitCode: number; passed: boolean }> }> {

@@ -1116,7 +1116,17 @@ function Workspace() {
 
         {showTerminal && activeRepo && (
           <div className="terminal-dock">
-            <TerminalPanel repo={activeRepo} branch={agentBranch || undefined} onClose={() => setShowTerminal(false)} />
+            <TerminalPanel
+              repo={activeRepo}
+              branch={agentBranch || undefined}
+              onClose={() => setShowTerminal(false)}
+              onRepair={(failure) => {
+                setAgentMode(true);
+                setInput(`Repair the active repository after verification failure. ${failure} Use the terminal output as evidence, inspect the affected code, make the smallest safe multi-file change, and verify the fix.`);
+                setShowTerminal(false);
+                requestAnimationFrame(() => inputRef.current?.focus());
+              }}
+            />
           </div>
         )}
 

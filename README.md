@@ -172,3 +172,12 @@ The verification pipeline runs available package scripts in this order: `lint`, 
 Terminal commands are subject to safety checks. Recursive force deletion, privilege escalation, remote-script piping, destructive system commands, destructive database operations, and direct remote Git mutation are blocked. Git pushes and pull requests should continue to use the explicit GitHub workflow with user confirmation.
 
 Terminal sessions are currently **ephemeral and process-scoped**. They are intended for personal development sessions and may be lost when a serverless instance is recycled. A future persistent-compute phase can move workspace state to a durable worker or connected local runtime without changing the UI contract.
+
+
+## ORA v1 Phase 2: Repair Loops and Multi-file Changes
+
+When verification fails, the terminal workspace now identifies the failed stage and offers a **Repair with ORA** handoff. This creates a focused Agent-mode task containing the failure evidence and asks ORA to inspect the affected code, make the smallest safe multi-file change, and verify the result.
+
+The terminal runtime also exposes a bounded multi-file patch action for approved repair batches. A repair batch is limited to 32 files, rejects duplicate paths, blocks protected `.git` paths and traversal attempts, enforces a 2 MB per-file limit, and supports create, modify, and delete actions. Patches are applied to the active workspace before the verification pipeline is run again.
+
+Repair automation remains bounded by ORA’s existing plan approval, tool-call, iteration, file-change, timeout, and authentication guardrails. Direct remote Git mutation remains blocked in the terminal runtime; commits and pushes continue through the explicit GitHub workflow.

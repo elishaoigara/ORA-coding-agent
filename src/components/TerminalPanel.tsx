@@ -4,15 +4,16 @@ import { useRef, useState } from "react";
 import { readSse } from "@/lib/readSse";
 
 interface TerminalLine { id: string; kind: string; text: string; timestamp: number; }
-interface Props { repo: string; branch?: string; onClose?: () => void; }
+interface Props { repo: string; branch?: string; onClose?: () => void; onRepair?: (failure: string) => void; }
 
-export default function TerminalPanel({ repo, branch, onClose }: Props) {
+export default function TerminalPanel({ repo, branch, onClose, onRepair }: Props) {
   const [sessionId, setSessionId] = useState("");
   const [lines, setLines] = useState<TerminalLine[]>([]);
   const [command, setCommand] = useState("");
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
   const [verification, setVerification] = useState<{ passed?: boolean; steps?: Array<{ label: string; passed: boolean; exitCode: number }> }>({});
+  const [lastFailure, setLastFailure] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -39,7 +40,13 @@ export default function TerminalPanel({ repo, branch, onClose }: Props) {
         const event = JSON.parse(data) as { type: string; kind?: string; text?: string; session?: { id: string }; passed?: boolean; steps?: Array<{ label: string; passed: boolean; exitCode: number }> };
         if (event.type === "terminal") addLine(event.kind ?? "system", event.text ?? "");
         if (event.type === "session" && event.session?.id) { setSessionId(event.session.id); setConnected(true); addLine("system", "Terminal session connected"); }
-        if (event.type === "verification_done") { setVerification({ passed: event.passed, steps: event.steps }); addLine(event.passed ? "result" : "stderr", event.passed ? "All verification checks passed" : "Verification needs repair"); }
+        if (event.type === "verification_done") {
+          setVerification({ passed: event.passed, steps: event.steps });
+          const failedStep = event.steps?.find((step) => !step.passed);
+          const failure = failedStep ? `${failedStep.label} failed with exit code ${failedStep.exitCode}. Inspect the streamed output, identify the root cause, and make the smallest safe multi-file repair.` : "Verification pipeline failed; inspect the streamed output.";
+          setLastFailure(event.passed ? "" : failure);
+          addLine(event.passed ? "result" : "stderr", event.passed ? "All verification checks passed" : failure);
+        }
         if (event.type === "error") addLine("stderr", event.text ?? "Terminal operation failed");
       });
     } catch (error) {
@@ -80,6 +87,7 @@ export default function TerminalPanel({ repo, branch, onClose }: Props) {
             <button type="button" onClick={() => streamAction("verify")} disabled={busy} className="terminal-panel__action">{busy ? "RUNNING…" : "VERIFY PROJECT"}</button>
             <button type="button" onClick={stop} className="terminal-panel__action terminal-panel__action--danger">STOP</button>
             {verification.steps && <span className={`terminal-panel__verification ${verification.passed ? "is-passed" : "is-failed"}`}>{verification.passed ? "PASS" : "REPAIR NEEDED"}</span>}
+            {!verification.passed && lastFailure && onRepair && <button type="button" onClick={() => onRepair(lastFailure)} className="terminal-panel__repair">REPAIR WITH ORA</button>}
           </div>
           <div className="terminal-panel__output" role="log" aria-live="polite">
             {lines.length === 0 && <div className="terminal-panel__empty">Workspace ready. Run a command or start verification.</div>}

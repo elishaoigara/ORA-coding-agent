@@ -1126,3 +1126,20 @@ html:not(.light) body {
   .terminal-panel__primary { margin-left: 37px; }
   .terminal-line { grid-template-columns: 52px minmax(0, 1fr); font-size: 9px; }
 }
+
+.terminal-panel__repair {
+  border: 1px solid rgba(190, 145, 255, .34);
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: #d4b5ff;
+  background: rgba(143, 92, 255, .1);
+  font: 600 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .08em;
+  white-space: nowrap;
+}
+.terminal-panel__repair:hover { border-color: #c38dff; background: rgba(143, 92, 255, .18); }
+@media (max-width: 767px) {
+  .terminal-panel__toolbar { flex-wrap: wrap; }
+  .terminal-panel__verification { margin-left: 0; }
+  .terminal-panel__repair { margin-left: auto; }
+}
