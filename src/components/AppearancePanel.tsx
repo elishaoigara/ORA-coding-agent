@@ -1,29 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTheme, type Theme } from "@/lib/theme";
 
 export type AccentId = "cyan" | "magenta" | "lime" | "amber" | "blue" | "red";
 export type Density = "comfortable" | "compact";
 export type PresetId = "neon-grid" | "synthwave" | "toxic-lab" | "solar-flare" | "deep-space" | "blood-moon";
+export type SoundMime = "audio/wav" | "audio/mpeg" | "audio/ogg" | "audio/webm";
 
-export interface AppearanceSettings {
-  accent: AccentId;
-  density: Density;
-  preset: PresetId;
-  soundEnabled: boolean;
-}
-
-export interface AppearancePreset {
-  id: PresetId;
-  label: string;
-  description: string;
-  accent: AccentId;
-  density: Density;
-  cyan: string;
-  violet: string;
-  line: string;
-}
+export interface SoundPack { id: string; name: string; mime: SoundMime; dataUrl: string; }
+export interface AppearanceSettings { accent: AccentId; density: Density; preset: PresetId; soundEnabled: boolean; }
+export interface AppearancePreset { id: PresetId; label: string; description: string; accent: AccentId; density: Density; cyan: string; violet: string; line: string; }
 
 export const PRESETS: AppearancePreset[] = [
   { id: "neon-grid", label: "Neon Grid", description: "Classic cyan command surface", accent: "cyan", density: "comfortable", cyan: "#48e6d1", violet: "#9b8cff", line: "rgba(72, 230, 209, .28)" },
@@ -43,79 +30,64 @@ export function readAppearance(): AppearanceSettings {
     const parsed = JSON.parse(localStorage.getItem("ora:appearance") || "null") as Partial<AppearanceSettings> | null;
     const preset = PRESETS.some((item) => item.id === parsed?.preset) ? parsed!.preset! : DEFAULTS.preset;
     const fromPreset = PRESETS.find((item) => item.id === preset) ?? PRESETS[0];
-    return {
-      ...DEFAULTS,
-      ...parsed,
-      preset,
-      accent: PRESETS.some((item) => item.accent === parsed?.accent) ? parsed!.accent! : fromPreset.accent,
-      density: parsed?.density === "compact" ? "compact" : fromPreset.density,
-      soundEnabled: parsed?.soundEnabled === true,
-    };
+    return { ...DEFAULTS, ...parsed, preset, accent: PRESETS.some((item) => item.accent === parsed?.accent) ? parsed!.accent! : fromPreset.accent, density: parsed?.density === "compact" ? "compact" : fromPreset.density, soundEnabled: parsed?.soundEnabled === true };
   } catch { return DEFAULTS; }
 }
 
-function playSignal(enabled: boolean) {
+function playSynth(enabled: boolean) {
   if (!enabled || typeof window === "undefined") return;
   try {
     const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextCtor) return;
     const context = new AudioContextCtor();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(520, context.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(760, context.currentTime + 0.08);
-    gain.gain.setValueAtTime(0.035, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.12);
-    oscillator.connect(gain).connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.12);
-    window.setTimeout(() => void context.close(), 180);
+    const oscillator = context.createOscillator(); const gain = context.createGain();
+    oscillator.type = "sine"; oscillator.frequency.setValueAtTime(520, context.currentTime); oscillator.frequency.exponentialRampToValueAtTime(760, context.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.035, context.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.12);
+    oscillator.connect(gain).connect(context.destination); oscillator.start(); oscillator.stop(context.currentTime + 0.12); window.setTimeout(() => void context.close(), 180);
   } catch { /* audio is optional */ }
 }
 
-export default function AppearancePanel({ settings, onChange, onClose }: { settings: AppearanceSettings; onChange: (next: AppearanceSettings) => void; onClose: () => void }) {
+interface AppearancePanelProps {
+  settings: AppearanceSettings;
+  onChange: (next: AppearanceSettings) => void;
+  onClose: () => void;
+  soundPacks?: SoundPack[];
+  selectedSoundPackId?: string;
+  onSelectSoundPack?: (id: string) => void;
+  onUploadSoundPack?: (file: File) => Promise<void>;
+  onDeleteSoundPack?: (id: string) => void;
+  profileStatus?: string;
+  onPullProfile?: () => Promise<void>;
+  onPushProfile?: () => Promise<void>;
+}
+
+export default function AppearancePanel({ settings, onChange, onClose, soundPacks = [], selectedSoundPackId = "", onSelectSoundPack, onUploadSoundPack, onDeleteSoundPack, profileStatus = "Local profile", onPullProfile, onPushProfile }: AppearancePanelProps) {
   const { theme, setTheme } = useTheme();
   const [draft, setDraft] = useState(settings);
+  const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => { setDraft(settings); }, [settings]);
 
-  const update = (next: AppearanceSettings, signal = true) => {
-    setDraft(next);
-    onChange(next);
-    playSignal(next.soundEnabled && signal);
+  const preview = (pack?: SoundPack) => {
+    if (!draft.soundEnabled) return;
+    if (pack) { try { const audio = new Audio(pack.dataUrl); audio.volume = 0.35; void audio.play(); return; } catch { /* fallback */ } }
+    playSynth(true);
   };
+  const update = (next: AppearanceSettings, signal = true) => { setDraft(next); onChange(next); if (signal) preview(soundPacks.find((pack) => pack.id === selectedSoundPackId)); };
   const selectPreset = (preset: AppearancePreset) => update({ ...draft, preset: preset.id, accent: preset.accent, density: preset.density });
 
   return (
     <section className="appearance-panel" aria-labelledby="appearance-title">
       <header className="appearance-panel__header">
-        <div><div className="appearance-panel__eyebrow">ORA // APPEARANCE</div><h2 id="appearance-title">Interface signal</h2><p>Customize the command surface.</p></div>
+        <div><div className="appearance-panel__eyebrow">ORA // APPEARANCE</div><h2 id="appearance-title">Interface signal</h2><p>Customize and sync your command surface.</p></div>
         <button type="button" className="appearance-panel__close touch-target" onClick={onClose} aria-label="Close appearance settings">×</button>
       </header>
       <div className="appearance-panel__body">
-        <fieldset className="appearance-panel__section appearance-panel__presets">
-          <legend className="appearance-panel__label">Cyberpunk presets</legend>
-          <div className="appearance-presets">
-            {PRESETS.map((preset) => <button key={preset.id} type="button" className={`appearance-preset ${draft.preset === preset.id ? "is-active" : ""}`} onClick={() => selectPreset(preset)} aria-pressed={draft.preset === preset.id}><span className="appearance-preset__signal" style={{ background: `linear-gradient(135deg, ${preset.cyan}, ${preset.violet})` }} /><span><strong>{preset.label}</strong><small>{preset.description}</small></span></button>)}
-          </div>
-        </fieldset>
-        <fieldset className="appearance-panel__section">
-          <legend className="appearance-panel__label">Theme mode</legend>
-          <div className="appearance-segmented" role="group" aria-label="Theme mode">
-            {(["dark", "light"] as Theme[]).map((value) => <button key={value} type="button" className={theme === value ? "is-active" : ""} onClick={() => setTheme(value)} aria-pressed={theme === value}>{value === "dark" ? "Night grid" : "Day grid"}</button>)}
-          </div>
-        </fieldset>
-        <fieldset className="appearance-panel__section">
-          <legend className="appearance-panel__label">Sound effects</legend>
-          <button type="button" className={`appearance-sound-toggle ${draft.soundEnabled ? "is-active" : ""}`} onClick={() => update({ ...draft, soundEnabled: !draft.soundEnabled }, false)} aria-pressed={draft.soundEnabled}><span aria-hidden="true">{draft.soundEnabled ? "◉" : "○"}</span><span>{draft.soundEnabled ? "Signal sounds on" : "Signal sounds off"}</span></button>
-          <p className="appearance-panel__hint">Optional UI chirps for palette changes and agent events.</p>
-        </fieldset>
-        <fieldset className="appearance-panel__section">
-          <legend className="appearance-panel__label">Workspace density</legend>
-          <div className="appearance-segmented" role="group" aria-label="Workspace density">
-            {(["comfortable", "compact"] as Density[]).map((value) => <button key={value} type="button" className={draft.density === value ? "is-active" : ""} onClick={() => update({ ...draft, density: value })} aria-pressed={draft.density === value}>{value}</button>)}
-          </div>
-        </fieldset>
+        <fieldset className="appearance-panel__section appearance-panel__presets"><legend className="appearance-panel__label">Cyberpunk presets</legend><div className="appearance-presets">{PRESETS.map((preset) => <button key={preset.id} type="button" className={`appearance-preset ${draft.preset === preset.id ? "is-active" : ""}`} onClick={() => selectPreset(preset)} aria-pressed={draft.preset === preset.id}><span className="appearance-preset__signal" style={{ background: `linear-gradient(135deg, ${preset.cyan}, ${preset.violet})` }} /><span><strong>{preset.label}</strong><small>{preset.description}</small></span></button>)}</div></fieldset>
+        <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Theme mode</legend><div className="appearance-segmented" role="group" aria-label="Theme mode">{(["dark", "light"] as Theme[]).map((value) => <button key={value} type="button" className={theme === value ? "is-active" : ""} onClick={() => setTheme(value)} aria-pressed={theme === value}>{value === "dark" ? "Night grid" : "Day grid"}</button>)}</div></fieldset>
+        <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Sound effects</legend><button type="button" className={`appearance-sound-toggle ${draft.soundEnabled ? "is-active" : ""}`} onClick={() => update({ ...draft, soundEnabled: !draft.soundEnabled }, false)} aria-pressed={draft.soundEnabled}><span aria-hidden="true">{draft.soundEnabled ? "◉" : "○"}</span><span>{draft.soundEnabled ? "Signal sounds on" : "Signal sounds off"}</span></button><p className="appearance-panel__hint">Optional UI chirps. Sound stays local unless you sync a selected pack.</p></fieldset>
+        <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Sound pack</legend><div className="appearance-sound-packs">{soundPacks.length === 0 && <span className="appearance-panel__hint">No custom pack uploaded.</span>}{soundPacks.map((pack) => <div key={pack.id} className={`appearance-sound-pack ${selectedSoundPackId === pack.id ? "is-active" : ""}`}><button type="button" onClick={() => { onSelectSoundPack?.(pack.id); preview(pack); }} aria-pressed={selectedSoundPackId === pack.id}><span>◖</span><strong>{pack.name}</strong></button><button type="button" className="appearance-sound-pack__delete" onClick={() => onDeleteSoundPack?.(pack.id)} aria-label={`Delete sound pack ${pack.name}`}>×</button></div>)}<input ref={fileRef} type="file" accept="audio/wav,audio/mpeg,audio/ogg,audio/webm" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUploadSoundPack?.(file); event.currentTarget.value = ""; }} /><button type="button" className="appearance-upload" onClick={() => fileRef.current?.click()} disabled={soundPacks.length >= 3}>+ Upload sound pack <span>(max 3, 256KB each)</span></button></div></fieldset>
+        <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Workspace density</legend><div className="appearance-segmented" role="group" aria-label="Workspace density">{(["comfortable", "compact"] as Density[]).map((value) => <button key={value} type="button" className={draft.density === value ? "is-active" : ""} onClick={() => update({ ...draft, density: value })} aria-pressed={draft.density === value}>{value}</button>)}</div></fieldset>
+        <fieldset className="appearance-panel__section appearance-profile-sync"><legend className="appearance-panel__label">Personal profile sync</legend><div className="appearance-profile-sync__row"><span className="appearance-panel__hint" role="status">{profileStatus}</span><button type="button" onClick={() => void onPullProfile?.()}>Pull</button><button type="button" onClick={() => void onPushProfile?.()}>Push</button></div><p className="appearance-panel__hint">Private GitHub Gist sync. Your profile is not written to this repository.</p></fieldset>
       </div>
     </section>
   );

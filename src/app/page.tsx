@@ -13,7 +13,7 @@ import AgentExecutionConsole, { type ExecutionLogEntry } from "@/components/Agen
 import TerminalPanel from "@/components/TerminalPanel";
 import ProjectMemoryPanel from "@/components/ProjectMemoryPanel";
 import CollaborationPanel from "@/components/CollaborationPanel";
-import AppearancePanel, { PRESETS, readAppearance, type AppearanceSettings } from "@/components/AppearancePanel";
+import AppearancePanel, { PRESETS, readAppearance, type AppearanceSettings, type SoundPack, type SoundMime } from "@/components/AppearancePanel";
 import AuthGate from "@/components/AuthGate";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
@@ -150,6 +150,12 @@ function Workspace() {
   const [showCollaboration, setShowCollaboration] = useState(false);
   const [showAppearance, setShowAppearance] = useState(false);
   const [appearance, setAppearance] = useState<AppearanceSettings>(() => readAppearance());
+  const [soundPacks, setSoundPacks] = useState<SoundPack[]>(() => {
+    try { return JSON.parse(lsGet("ora:sound-packs", "[]")) as SoundPack[]; } catch { return []; }
+  });
+  const [selectedSoundPackId, setSelectedSoundPackId] = useState(() => lsGet("ora:selected-sound-pack", ""));
+  const [profileGistId, setProfileGistId] = useState(() => lsGet("ora:profile-gist", ""));
+  const [profileStatus, setProfileStatus] = useState("Local profile");
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [projectInput, setProjectInput]   = useState("");
   const [projectMemory, setProjectMemory] = useState<ProjectMemory>(() => createProjectMemory(""));
@@ -213,6 +219,48 @@ function Workspace() {
   } = useConversations();
 
   const { toggleTheme } = useTheme();
+
+  const persistSoundPacks = useCallback((next: SoundPack[]) => {
+    setSoundPacks(next);
+    lsSet("ora:sound-packs", JSON.stringify(next));
+  }, []);
+
+  const handleUploadSoundPack = useCallback(async (file: File) => {
+    const allowed = new Set(["audio/wav", "audio/mpeg", "audio/ogg", "audio/webm"]);
+    if (!allowed.has(file.type)) { setProfileStatus("Unsupported audio format"); return; }
+    if (file.size > 256 * 1024) { setProfileStatus("Sound pack must be 256KB or smaller"); return; }
+    if (soundPacks.length >= 3) { setProfileStatus("Maximum of 3 sound packs"); return; }
+    const dataUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
+    const id = `${file.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "sound"}-${Date.now().toString(36)}`;
+    const next = [...soundPacks, { id, name: file.name.replace(/\.[^.]+$/, "").slice(0, 80), mime: file.type as SoundMime, dataUrl }];
+    persistSoundPacks(next); setSelectedSoundPackId(id); lsSet("ora:selected-sound-pack", id); setProfileStatus("Sound pack ready to sync");
+  }, [persistSoundPacks, soundPacks]);
+
+  const pullPersonalProfile = useCallback(async () => {
+    setProfileStatus("Pulling private profile…");
+    try {
+      const query = profileGistId ? `?gistId=${encodeURIComponent(profileGistId)}` : "";
+      const response = await fetch(`/api/profile${query}`);
+      const data = await response.json() as { error?: string; gistId?: string | null; profile?: { appearance: AppearanceSettings; soundPacks: SoundPack[] } | null };
+      if (!response.ok || data.error) throw new Error(data.error || "Profile pull failed");
+      if (data.gistId) { setProfileGistId(data.gistId); lsSet("ora:profile-gist", data.gistId); }
+      if (data.profile) { setAppearance(data.profile.appearance); persistSoundPacks(data.profile.soundPacks); const selected = data.profile.soundPacks[0]?.id ?? ""; setSelectedSoundPackId(selected); lsSet("ora:selected-sound-pack", selected); }
+      setProfileStatus(data.profile ? "Synced from private Gist" : "No remote profile yet");
+    } catch (error) { setProfileStatus(error instanceof Error ? error.message : "Profile pull failed"); }
+  }, [persistSoundPacks, profileGistId]);
+
+  const pushPersonalProfile = useCallback(async () => {
+    setProfileStatus("Pushing private profile…");
+    try {
+      const response = await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gistId: profileGistId || undefined, appearance, soundPacks }) });
+      const data = await response.json() as { error?: string; gistId?: string | null };
+      if (!response.ok || data.error) throw new Error(data.error || "Profile push failed");
+      if (data.gistId) { setProfileGistId(data.gistId); lsSet("ora:profile-gist", data.gistId); }
+      setProfileStatus("Synced to private Gist");
+    } catch (error) { setProfileStatus(error instanceof Error ? error.message : "Profile push failed"); }
+  }, [appearance, profileGistId, soundPacks]);
+
+  useEffect(() => { lsSet("ora:selected-sound-pack", selectedSoundPackId); }, [selectedSoundPackId]);
 
   useKeyboardShortcuts({
     onSend:          () => !loading && sendMessage(),
@@ -1170,7 +1218,19 @@ function Workspace() {
 
         {showAppearance && (
           <div className="appearance-dock">
-            <AppearancePanel settings={appearance} onChange={setAppearance} onClose={() => setShowAppearance(false)} />
+            <AppearancePanel
+              settings={appearance}
+              onChange={setAppearance}
+              onClose={() => setShowAppearance(false)}
+              soundPacks={soundPacks}
+              selectedSoundPackId={selectedSoundPackId}
+              onSelectSoundPack={(id) => setSelectedSoundPackId(id)}
+              onUploadSoundPack={handleUploadSoundPack}
+              onDeleteSoundPack={(id) => { const next = soundPacks.filter((pack) => pack.id !== id); persistSoundPacks(next); if (selectedSoundPackId === id) setSelectedSoundPackId(""); }}
+              profileStatus={profileStatus}
+              onPullProfile={pullPersonalProfile}
+              onPushProfile={pushPersonalProfile}
+            />
           </div>
         )}
         {showMemory && activeRepo && (

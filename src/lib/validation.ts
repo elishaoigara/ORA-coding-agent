@@ -177,6 +177,26 @@ export const conversationsSyncSchema = z.object({
 });
 export type ConversationsSyncRequest = z.infer<typeof conversationsSyncSchema>;
 
+// ── /api/profile — private Gist-backed personal profile sync ────────────────
+const profileSoundPackSchema = z.object({
+  id: z.string().trim().min(1).max(80).regex(/^[a-z0-9_-]+$/i),
+  name: z.string().trim().min(1).max(80),
+  mime: z.enum(["audio/wav", "audio/mpeg", "audio/ogg", "audio/webm"]),
+  dataUrl: z.string().regex(/^data:audio\/(wav|mpeg|ogg|webm);base64,[A-Za-z0-9+/=]+$/).max(360_000),
+});
+
+export const profileSyncSchema = z.object({
+  gistId: z.string().trim().max(200).optional(),
+  appearance: z.object({
+    accent: z.enum(["cyan", "magenta", "lime", "amber", "blue", "red"]),
+    density: z.enum(["comfortable", "compact"]),
+    preset: z.enum(["neon-grid", "synthwave", "toxic-lab", "solar-flare", "deep-space", "blood-moon"]),
+    soundEnabled: z.boolean(),
+  }),
+  soundPacks: z.array(profileSoundPackSchema).max(3),
+});
+export type ProfileSyncRequest = z.infer<typeof profileSyncSchema>;
+
 // ── Helper: parse-or-400 ──────────────────────────────────────────────────────
 /**
  * Parses `raw` against `schema`. Returns the typed data on success, or a
