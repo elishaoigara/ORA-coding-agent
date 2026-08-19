@@ -811,14 +811,14 @@ function Workspace() {
       </div>
 
       {/* ── Main area ─────────────────────────────────────────────────────── */}
-      <div className="ora-workspace flex-1 flex flex-col min-w-0">
+      <div className="ora-workspace ora-canvas flex-1 flex flex-col min-w-0">
 
         {/* ── Top bar ───────────────────────────────────────────────────── */}
         <div className="ora-topbar flex items-center gap-2 px-3 md:px-5 py-2.5 border-b border-zinc-800 light:border-[#e5ded1] bg-zinc-900/90 light:bg-white/90 backdrop-blur-sm flex-shrink-0">
           {/* Left: menu + title */}
           <button
             onClick={() => setShowHistory((v) => !v)}
-            className="touch-target text-zinc-500 hover:text-zinc-200 light:text-[#8a7f6d] light:hover:text-[#2b2620] md:hidden flex-shrink-0"
+            className="workspace-nav-toggle touch-target text-zinc-500 hover:text-zinc-200 light:text-[#8a7f6d] light:hover:text-[#2b2620] flex-shrink-0"
             aria-label="History"
           >
             <IconMenu />
@@ -1264,7 +1264,7 @@ function Workspace() {
       )}
 
       {/* ── GitHub sidebar ────────────────────────────────────────────────── */}
-      <div className={`sidebar-right ora-rail ora-github-rail ${showGitHub ? "open" : ""} md:static md:transform-none md:visible md:w-80 md:flex md:flex-col md:border-l md:border-zinc-800 light:md:border-[#e5ded1] md:bg-transparent`}>
+      <div className={`sidebar-right ora-rail ora-github-rail ${showGitHub ? "open" : ""} md:static md:transform-none md:visible md:flex md:flex-col md:border-l md:border-zinc-800 light:md:border-[#e5ded1] md:bg-transparent`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1] flex-shrink-0">
           <span className="text-zinc-100 light:text-[#2b2620] text-sm font-semibold">GitHub</span>
           <button onClick={() => setShowGitHub(false)} className="touch-target text-zinc-500 hover:text-zinc-200 light:text-[#8a7f6d] light:hover:text-[#2b2620]">

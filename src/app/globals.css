@@ -920,3 +920,103 @@ html:not(.light) body {
 @media (prefers-reduced-motion: reduce) {
   .coding-message { animation: none; }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   SPACIOUS AGENT WORKSPACE
+   Arena-style proportions: navigation is compact, the conversation owns the
+   viewport, and repository context is an optional dock rather than a fixed
+   equal column.
+   ────────────────────────────────────────────────────────────────────────── */
+.ora-canvas { min-width: 0; }
+
+@media (min-width: 768px) {
+  .ora-history-rail {
+    width: 64px !important;
+    min-width: 64px !important;
+    max-width: 64px !important;
+    overflow: hidden !important;
+    transition: width .22s ease, min-width .22s ease, max-width .22s ease, box-shadow .22s ease;
+  }
+
+  .ora-history-rail.open {
+    width: 292px !important;
+    min-width: 292px !important;
+    max-width: 292px !important;
+    overflow: hidden !important;
+    box-shadow: 14px 0 50px rgba(0, 0, 0, .24);
+  }
+
+  .ora-history-rail > div:first-child {
+    min-height: 64px;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    justify-content: center !important;
+    gap: 0;
+  }
+
+  .ora-history-rail.open > div:first-child {
+    padding-left: 16px !important;
+    padding-right: 10px !important;
+    justify-content: space-between !important;
+  }
+
+  .ora-history-rail > div:first-child > span {
+    width: 26px;
+    height: 26px;
+    overflow: hidden;
+    font-size: 0 !important;
+  }
+
+  .ora-history-rail > div:first-child > span::before {
+    content: "◫";
+    color: var(--ora-cyan);
+    font: 20px/26px ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .ora-history-rail.open > div:first-child > span {
+    width: auto;
+    height: auto;
+    font-size: 13px !important;
+  }
+
+  .ora-history-rail.open > div:first-child > span::before { display: none; }
+  .ora-history-rail > div:nth-child(2) { display: none !important; }
+  .ora-history-rail.open > div:nth-child(2) { display: flex !important; min-width: 292px; }
+
+  .ora-github-rail {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    border-left-width: 0 !important;
+    overflow: hidden !important;
+    opacity: 0;
+    pointer-events: none;
+    transition: width .22s ease, min-width .22s ease, max-width .22s ease, opacity .18s ease;
+  }
+
+  .ora-github-rail.open {
+    width: 340px !important;
+    min-width: 340px !important;
+    max-width: 340px !important;
+    border-left-width: 1px !important;
+    opacity: 1;
+    pointer-events: auto;
+    overflow: hidden !important;
+    box-shadow: -14px 0 50px rgba(0, 0, 0, .24);
+  }
+
+  .ora-topbar { min-height: 64px; }
+  .ora-topbar > span { max-width: min(48vw, 620px); }
+  .ora-chat-scroll { padding-left: clamp(24px, 7vw, 120px) !important; padding-right: clamp(24px, 7vw, 120px) !important; }
+  .coding-message { max-width: 860px !important; }
+  .coding-composer > div { padding-left: clamp(24px, 7vw, 120px) !important; padding-right: clamp(24px, 7vw, 120px) !important; }
+  .coding-composer__row { max-width: 980px; }
+}
+
+@media (max-width: 767px) {
+  .workspace-nav-toggle { display: flex !important; }
+  .ora-history-rail,
+  .ora-github-rail { width: min(88vw, 360px) !important; max-width: min(88vw, 360px) !important; }
+  .ora-github-rail.open { min-width: min(88vw, 360px) !important; }
+  .ora-canvas { width: 100%; }
+}
