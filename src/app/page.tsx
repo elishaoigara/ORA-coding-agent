@@ -9,6 +9,7 @@ import PlanApproval from "@/components/PlanApproval";
 import LocalFileContext from "@/components/LocalFileContext";
 import ArtifactPanel, { type Artifact } from "@/components/ArtifactPanel";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import AgentExecutionConsole, { type ExecutionLogEntry } from "@/components/AgentExecutionConsole";
 import AuthGate from "@/components/AuthGate";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
@@ -46,13 +47,22 @@ interface ContinueEvent {
 }
 
 interface AgentStreamEvent {
-  type: "meta" | "progress" | "tool_call" | "text" | "plan" | "staged" | "error" | "continue" | "done";
+  type: "meta" | "progress" | "tool_call" | "tool_result" | "text" | "plan" | "staged" | "error" | "continue" | "done";
   text?: string;
   plan?: AgentPlan;
   files?: StagedFile[];
   messages?: unknown[];
   stagedFiles?: StagedFile[];
   progress?: string;
+  detail?: string;
+  name?: string;
+  status?: string;
+  runId?: string;
+  taskKind?: string;
+  risk?: string;
+  iterations?: number;
+  toolCalls?: number;
+  stagedCount?: number;
 }
 
 function upsertStagedFiles(current: StagedFile[], incoming: StagedFile[]): StagedFile[] {
@@ -150,7 +160,8 @@ function Workspace() {
   const [convUsage, setConvUsage]         = useState<TokenUsage | null>(null);
   const [systemPrompt, setSystemPrompt]   = useState("");
   const [branchFirst, setBranchFirst]     = useState(false);
-  const [agentBranch, setAgentBranch]     = useState(""); // UI improvement #7
+    const [agentBranch, setAgentBranch] = useState(""); // UI improvement #7
+  const [executionLogs, setExecutionLogs] = useState<ExecutionLogEntry[]>([]);
 
   // Bug fix #9: SSR-safe localStorage initialisation
   const [snippets, setSnippets] = useState<{id:string;label:string;lang:string;code:string}[]>(() => {
@@ -398,6 +409,14 @@ function Workspace() {
     await sendChat(userText, truncated);
   }
 
+  function pushExecutionLog(kind: ExecutionLogEntry["kind"], text: string, detail?: string) {
+    if (!text.trim()) return;
+    setExecutionLogs((current) => [
+      ...current.slice(-119),
+      { id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, kind, text: text.trim(), detail, timestamp: Date.now() },
+    ]);
+  }
+
   async function readAgentStream(response: Response): Promise<{
     agentText: string;
     plan?: AgentPlan;
@@ -413,8 +432,16 @@ function Workspace() {
 
     await readSse(response, ({ data }) => {
       const event = JSON.parse(data) as AgentStreamEvent;
-      if (event.type === "progress" || event.type === "tool_call") {
+      if (event.type === "meta") {
+        pushExecutionLog("system", `Run ${event.runId ?? "initialized"}`, `${event.taskKind ?? "coding"} · ${event.risk ?? "normal"} risk`);
+      } else if (event.type === "progress") {
         setAgentStatus(event.text ?? "");
+        pushExecutionLog("progress", event.text ?? "Agent is working");
+      } else if (event.type === "tool_call") {
+        setAgentStatus(event.text ?? "");
+        pushExecutionLog("tool", event.text ?? "Calling repository tool");
+      } else if (event.type === "tool_result") {
+        pushExecutionLog("result", event.text ?? "Tool completed", event.detail);
       } else if (event.type === "text") {
         agentText += event.text ?? "";
         setMessages((current) => [
@@ -429,6 +456,7 @@ function Workspace() {
         setStagedFiles((current) => upsertStagedFiles(current, incoming));
       } else if (event.type === "error") {
         streamError = event.text || "Agent execution failed";
+        pushExecutionLog("error", streamError);
       } else if (event.type === "continue") {
         continuePayload = {
           messages: event.messages ?? [],
@@ -436,9 +464,11 @@ function Workspace() {
           progress: event.progress,
         };
         setAgentStatus(event.progress ?? "Continuing…");
+        pushExecutionLog("progress", event.progress ?? "Resuming execution");
       } else if (event.type === "done") {
         receivedDone = true;
         setAgentStatus("");
+        pushExecutionLog("complete", `Run complete · ${event.stagedCount ?? 0} staged file(s)`, `${event.toolCalls ?? 0} tool calls · ${event.iterations ?? 0} iterations`);
       }
     });
 
@@ -514,6 +544,7 @@ function Workspace() {
     setCurrentTask(userText);
     setCurrentPlan(null);
     setStagedFiles([]);
+    setExecutionLogs([]);
     setAgentIteration(0);
     setAgentPhase("planning");
     setLoading(true);
@@ -703,7 +734,7 @@ function Workspace() {
     abortRef.current?.abort();
     newConversation();
     setMessages([]); setRoutingBadges({}); setProjectInput(""); setSystemPrompt("");
-    setInjectedFiles([]); setLocalFiles([]); setActiveRepo(""); setStagedFiles([]); setCurrentPlan(null);
+    setInjectedFiles([]); setLocalFiles([]); setActiveRepo(""); setStagedFiles([]); setCurrentPlan(null); setExecutionLogs([]);
     setAgentPhase("idle"); setConvUsage(null); setAgentBranch(""); setAgentIteration(0);
   }
 
@@ -890,6 +921,15 @@ function Workspace() {
               )}
             </div>
           </div>
+        )}
+
+        {(executionLogs.length > 0 || isAgentBusy) && (
+          <AgentExecutionConsole
+            logs={executionLogs}
+            active={isAgentBusy}
+            phase={agentPhase}
+            onClear={() => setExecutionLogs([])}
+          />
         )}
 
         {/* ── Model picker dropdown ─────────────────────────────────────── */}

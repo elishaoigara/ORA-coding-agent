@@ -82,9 +82,24 @@ function toolLabel(name: string, args: Record<string, string>): string {
     stage_file: `Staging ${args.path ?? "file"}${ELLIPSIS}`,
     delete_file: `Deleting ${args.path ?? "file"}${ELLIPSIS}`,
   };
-  return labels[name] ?? `Calling ${name}${ELLIPSIS}`;
+    return labels[name] ?? `Calling ${name}${ELLIPSIS}`;
 }
-
+function toolResultSummary(name: string, raw: string): { text: string; detail?: string } {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (parsed.error) return { text: `${name} returned an error`, detail: String(parsed.error).slice(0, 180) };
+    if (parsed.success) {
+      const path = typeof parsed.path === "string" ? ` · ${parsed.path}` : "";
+      const status = typeof parsed.status === "string" ? ` · ${parsed.status}` : "";
+      return { text: `${name} completed${status}${path}`, detail: typeof parsed.count === "number" ? `${parsed.count} result(s)` : undefined };
+    }
+    if (typeof parsed.count === "number") return { text: `${name} completed`, detail: `${parsed.count} result(s)` };
+    if (Array.isArray(parsed.results)) return { text: `${name} completed`, detail: `${parsed.results.length} result(s)` };
+  } catch {
+    return { text: `${name} completed` };
+  }
+  return { text: `${name} completed` };
+}
 function recoverMalformedToolCalls(body: string): Array<{
   name: string;
   args: Record<string, string>;
@@ -323,6 +338,8 @@ export async function POST(request: NextRequest) {
                   const id = `recovered_${Date.now()}_${index}`;
                   send("tool_call", { text: toolLabel(call.name, call.args) });
                   const result = await executeTool(call.name, call.args);
+                  const resultSummary = toolResultSummary(call.name, result);
+                  send("tool_result", { text: resultSummary.text, detail: resultSummary.detail, name: call.name });
                   toolCalls.push({
                     id,
                     type: "function",
@@ -388,6 +405,8 @@ export async function POST(request: NextRequest) {
               toolCall.id = id;
               send("tool_call", { text: toolLabel(name, args) });
               const result = await executeTool(name, args);
+              const resultSummary = toolResultSummary(name, result);
+              send("tool_result", { text: resultSummary.text, detail: resultSummary.detail, name });
               messages.push({ role: "tool", tool_call_id: id, content: result });
             }
             continue;

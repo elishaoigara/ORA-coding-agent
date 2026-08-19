@@ -531,3 +531,119 @@ html:not(.light) body {
 @media (prefers-reduced-motion: reduce) {
   .ora-orb, .ora-prompt-chip { transition: none !important; transform: none !important; }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   CYBERPUNK EXECUTION TELEMETRY
+   ────────────────────────────────────────────────────────────────────────── */
+.execution-console {
+  position: relative;
+  z-index: 25;
+  margin: 0;
+  border-bottom: 1px solid rgba(72, 230, 209, 0.16);
+  background: linear-gradient(180deg, rgba(10, 16, 29, 0.98), rgba(7, 11, 20, 0.96));
+  box-shadow: inset 0 1px 0 rgba(155, 140, 255, 0.08), 0 12px 30px rgba(0, 0, 0, 0.18);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.execution-console.is-active { border-bottom-color: rgba(72, 230, 209, 0.38); }
+
+.execution-console__header,
+.execution-console__footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  padding: 8px 16px;
+}
+
+.execution-console__header {
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(139, 157, 190, 0.12);
+  background: linear-gradient(90deg, rgba(72, 230, 209, 0.055), transparent 44%, rgba(155, 140, 255, 0.06));
+}
+
+.execution-console__identity,
+.execution-console__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.execution-console__signal { display: flex; gap: 3px; align-items: flex-end; height: 18px; }
+.execution-console__signal i { display: block; width: 3px; background: var(--ora-cyan); box-shadow: 0 0 8px var(--ora-cyan); animation: telemetry-bars 1.1s ease-in-out infinite; }
+.execution-console__signal i:nth-child(1) { height: 7px; animation-delay: 0s; }
+.execution-console__signal i:nth-child(2) { height: 14px; animation-delay: .18s; }
+.execution-console__signal i:nth-child(3) { height: 10px; animation-delay: .34s; }
+.execution-console:not(.is-active) .execution-console__signal i { animation-play-state: paused; opacity: .45; }
+
+@keyframes telemetry-bars { 0%, 100% { transform: scaleY(.55); opacity: .45; } 50% { transform: scaleY(1); opacity: 1; } }
+
+.execution-console__eyebrow { color: var(--ora-cyan); font-size: 9px; letter-spacing: .16em; }
+.execution-console__title { color: #dce6f6; font-size: 12px; margin-top: 3px; }
+.execution-console__phase { color: var(--ora-violet); font-size: 9px; letter-spacing: .1em; white-space: nowrap; }
+.execution-console__clear { color: var(--ora-dim); font-size: 9px; letter-spacing: .12em; }
+.execution-console__clear:hover { color: var(--ora-cyan); }
+
+.execution-console__viewport {
+  max-height: 166px;
+  overflow-y: auto;
+  padding: 7px 16px 8px;
+  scrollbar-gutter: stable;
+}
+
+.execution-console__empty { color: var(--ora-dim); font-size: 11px; padding: 9px 0; }
+.execution-console__cursor { color: var(--ora-cyan); animation: cursor-blink 1s steps(2, jump-none) infinite; }
+@keyframes cursor-blink { 50% { opacity: 0; } }
+
+.execution-log {
+  display: grid;
+  grid-template-columns: 64px 62px minmax(0, auto) auto;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 22px;
+  color: #9aa9bf;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.execution-log__time { color: #4f5c72; font-size: 9px; }
+.execution-log__tag { display: inline-flex; gap: 5px; align-items: center; color: var(--ora-cyan); font-size: 9px; letter-spacing: .08em; }
+.execution-log__tag b { font-size: 12px; font-weight: 500; }
+.execution-log__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.execution-log__detail { color: #66748c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.execution-log--system .execution-log__tag { color: var(--ora-violet); }
+.execution-log--progress .execution-log__tag { color: #b9a8ff; }
+.execution-log--result .execution-log__tag,
+.execution-log--complete .execution-log__tag { color: var(--ora-cyan); }
+.execution-log--error .execution-log__tag { color: #ff6d9d; }
+.execution-log--error .execution-log__text { color: #ff9abb; }
+
+.execution-console__footer { justify-content: space-between; min-height: 28px; padding-top: 5px; padding-bottom: 6px; color: #4f5c72; font-size: 9px; border-top: 1px solid rgba(139, 157, 190, 0.08); }
+.execution-console__latest { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.execution-console__dot { width: 6px; height: 6px; border-radius: 50%; background: #445067; }
+.execution-console__dot.is-live { background: var(--ora-cyan); box-shadow: 0 0 10px var(--ora-cyan); }
+
+@media (max-width: 767px) {
+  .ora-shell { background-size: 24px 24px; }
+  .ora-topbar { padding-left: 10px !important; padding-right: 10px !important; gap: 4px !important; }
+  .ora-topbar > span { max-width: 92px; }
+  .ora-topbar .touch-target { min-width: 38px; min-height: 38px; }
+  .ora-model-trigger { max-width: 110px; padding-left: 8px; padding-right: 8px; }
+  .execution-console__header, .execution-console__footer { padding-left: 11px; padding-right: 11px; }
+  .execution-console__viewport { max-height: 144px; padding-left: 11px; padding-right: 11px; }
+  .execution-log { grid-template-columns: 48px 48px minmax(0, 1fr); gap: 5px; font-size: 9px; }
+  .execution-log__detail { display: none; }
+  .execution-console__phase { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+  .ora-empty-state { padding-left: 12px; padding-right: 12px; }
+  .ora-prompt-chip { min-height: 66px; padding: 10px !important; }
+  .ora-composer { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .ora-composer .input-field { min-height: 48px; }
+}
+
+@media (max-width: 390px) {
+  .ora-topbar > span { max-width: 70px; font-size: 10px; }
+  .ora-model-trigger { max-width: 88px; }
+  .execution-console__title { font-size: 11px; }
+  .execution-console__phase { display: none; }
+}
