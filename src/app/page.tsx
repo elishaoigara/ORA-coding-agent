@@ -11,6 +11,8 @@ import ArtifactPanel, { type Artifact } from "@/components/ArtifactPanel";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import AgentExecutionConsole, { type ExecutionLogEntry } from "@/components/AgentExecutionConsole";
 import TerminalPanel from "@/components/TerminalPanel";
+import ProjectMemoryPanel from "@/components/ProjectMemoryPanel";
+import CollaborationPanel from "@/components/CollaborationPanel";
 import AuthGate from "@/components/AuthGate";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
@@ -22,6 +24,8 @@ import type { Message, InjectedFile, PublicProvider, GitHubContext } from "@/typ
 import type { StagedFile } from "@/lib/agentTools";
 import type { AgentPlan } from "@/lib/agent/types";
 import type { TokenUsage } from "@/lib/tokenCost";
+import { createProjectMemory, loadProjectMemory, memoryPromptContext, type ProjectMemory } from "@/lib/projectMemory";
+import { collaborationBrief, type SpecialistRole } from "@/lib/collaboration";
 import { readSse } from "@/lib/readSse";
 
 const QUICK_PROMPTS = [
@@ -141,8 +145,12 @@ function Workspace() {
   const [showHistory, setShowHistory]     = useState(false);
   const [showGitHub, setShowGitHub]       = useState(false);
   const [showTerminal, setShowTerminal]   = useState(false);
+  const [showMemory, setShowMemory]       = useState(false);
+  const [showCollaboration, setShowCollaboration] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [projectInput, setProjectInput]   = useState("");
+  const [projectMemory, setProjectMemory] = useState<ProjectMemory>(() => createProjectMemory(""));
+  const [specialists, setSpecialists] = useState<SpecialistRole[]>([]);
 
   const [agentMode, setAgentMode]         = useState(false);
   const [agentPhase, setAgentPhase]       = useState<AgentPhase>("idle");
@@ -509,7 +517,7 @@ function Workspace() {
       headers: { "Content-Type": "application/json" },
       signal: abortRef.current?.signal,
       body: JSON.stringify({
-        task: params.task,
+        task: `${params.task}${memoryPromptContext(projectMemory)}${collaborationBrief(specialists)}`,
         repo: activeRepo,
         phase: params.phase,
         plan: params.plan,
@@ -749,10 +757,13 @@ function Workspace() {
   }
 
   const closeAll = useCallback(() => {
-    setShowHistory(false); setShowGitHub(false); setShowModelPicker(false); setShowTerminal(false);
+    setShowHistory(false); setShowGitHub(false); setShowModelPicker(false); setShowTerminal(false); setShowMemory(false); setShowCollaboration(false);
   }, []);
 
   useEffect(() => { closeAll(); }, [activeId, closeAll]);
+  useEffect(() => {
+    setProjectMemory(activeRepo ? loadProjectMemory(activeRepo) : createProjectMemory(""));
+  }, [activeRepo]);
 
   // Bug fix #2: explicit isAgentBusy check
   const isAgentBusy   = agentPhase === "planning" || agentPhase === "executing";
@@ -781,7 +792,7 @@ function Workspace() {
           and the model picker is a small anchored dropdown, so a full-screen
           dimmed backdrop has nothing to justify and would otherwise cover the
           whole app and swallow every click until manually dismissed. */}
-      {(showHistory || showGitHub || showModelPicker || showTerminal) && (
+      {(showHistory || showGitHub || showModelPicker || showTerminal || showMemory || showCollaboration) && (
         <div className="mobile-overlay md:hidden" onClick={closeAll} />
       )}
 
@@ -882,6 +893,22 @@ function Workspace() {
               </button>
             )}
 
+            {agentMode && <button
+              onClick={() => setShowCollaboration((v) => !v)}
+              className={`workspace-tool-toggle touch-target ${showCollaboration ? "is-active" : ""}`}
+              aria-label="Specialist collaboration"
+              title="Specialist collaboration"
+            >
+              <span className="workspace-tool-toggle__glyph">◎</span>
+            </button>}
+            {activeRepo && <button
+              onClick={() => setShowMemory((v) => !v)}
+              className={`workspace-tool-toggle touch-target ${showMemory ? "is-active" : ""}`}
+              aria-label="Project memory"
+              title="Project memory"
+            >
+              <span className="workspace-tool-toggle__glyph">⌬</span>
+            </button>}
             <button
               onClick={() => setShowTerminal((v) => !v)}
               className={`workspace-tool-toggle touch-target ${showTerminal ? "is-active" : ""}`}
@@ -1114,6 +1141,16 @@ function Workspace() {
           <div ref={bottomRef} />
         </div>
 
+        {showMemory && activeRepo && (
+          <div className="memory-dock">
+            <ProjectMemoryPanel memory={projectMemory} onChange={setProjectMemory} onClose={() => setShowMemory(false)} />
+          </div>
+        )}
+        {showCollaboration && agentMode && (
+          <div className="collaboration-dock">
+            <CollaborationPanel selected={specialists} onChange={setSpecialists} onClose={() => setShowCollaboration(false)} />
+          </div>
+        )}
         {showTerminal && activeRepo && (
           <div className="terminal-dock">
             <TerminalPanel

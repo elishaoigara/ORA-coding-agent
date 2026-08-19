@@ -181,3 +181,14 @@ When verification fails, the terminal workspace now identifies the failed stage 
 The terminal runtime also exposes a bounded multi-file patch action for approved repair batches. A repair batch is limited to 32 files, rejects duplicate paths, blocks protected `.git` paths and traversal attempts, enforces a 2 MB per-file limit, and supports create, modify, and delete actions. Patches are applied to the active workspace before the verification pipeline is run again.
 
 Repair automation remains bounded by ORA’s existing plan approval, tool-call, iteration, file-change, timeout, and authentication guardrails. Direct remote Git mutation remains blocked in the terminal runtime; commits and pushes continue through the explicit GitHub workflow.
+
+
+## ORA v1 Phase 3: Memory and Specialist Mesh
+
+ORA now maintains a per-repository **Context Vault** in browser storage. It stores user-maintained architecture notes, stack information, conventions, database and deployment context, important decisions, known bugs, and TODOs. Memory is normalized, size-limited, editable, and injected into Agent mode as context that ORA must verify against repository evidence before relying on it.
+
+Agent mode also includes a bounded **Specialist Mesh**. The manager can use up to four selected perspectives from Researcher, Coder, Debugger, Tester, Reviewer, Security, and DevOps. The selected role brief is included in the task context, and the manager must reconcile the perspectives into one plan while preserving the existing approval boundary.
+
+ORA exposes structured progress, tool activity, verification evidence, plans, risks, and decisions through the UI rather than exposing private hidden chain-of-thought. This keeps the collaboration explainable and reviewable without treating internal model reasoning as user-visible data.
+
+The current memory implementation is browser-persistent per repository. A future sync layer can store the same schema in a private repository file, encrypted database, or user-controlled local runtime.
