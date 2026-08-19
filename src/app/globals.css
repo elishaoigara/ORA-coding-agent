@@ -647,3 +647,100 @@ html:not(.light) body {
   .execution-console__title { font-size: 11px; }
   .execution-console__phase { display: none; }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   THEME COHESION LAYER
+   Keep the workspace visually unified even when the legacy light-theme toggle
+   is active; no panel should fall back to a cream surface inside ORA.
+   ────────────────────────────────────────────────────────────────────────── */
+.ora-shell,
+.light .ora-shell {
+  --ora-panel: #0d1220;
+  --ora-panel-raised: #11182a;
+  --ora-panel-deep: #090e19;
+  --ora-copy: #dce6f6;
+  --ora-copy-muted: #8793aa;
+  --ora-border: rgba(139, 157, 190, 0.16);
+  color: var(--ora-copy) !important;
+}
+
+.light .ora-shell .ora-rail,
+.light .ora-shell .ora-workspace,
+.light .ora-shell .ora-topbar,
+.light .ora-shell .ora-composer,
+.light .ora-shell .model-command-panel,
+.light .ora-shell .bottom-sheet {
+  background-color: var(--ora-panel) !important;
+  color: var(--ora-copy) !important;
+  border-color: var(--ora-border) !important;
+}
+
+.light .ora-shell .ora-workspace { background: rgba(8, 11, 19, 0.56) !important; }
+.light .ora-shell .ora-topbar,
+.light .ora-shell .ora-composer { background: rgba(9, 13, 23, 0.9) !important; }
+.light .ora-shell .model-command-panel { background: rgba(13, 18, 32, 0.99) !important; }
+
+.ora-shell [class~="light:bg-white"],
+.ora-shell [class~="light:bg-white/90"],
+.ora-shell [class~="light:bg-[#faf8f4]"],
+.ora-shell [class~="light:bg-[#f8f5f0]"],
+.ora-shell [class~="light:bg-[#efe9dd]"],
+.ora-shell [class~="light:bg-[#e5ded1]"] {
+  background-color: var(--ora-panel) !important;
+}
+
+.ora-shell [class~="light:border-[#e5ded1]"],
+.ora-shell [class~="light:border-[#ddd3bd]"],
+.ora-shell [class~="light:border-[#c7bda8]"] {
+  border-color: var(--ora-border) !important;
+}
+
+.ora-shell [class~="light:text-[#2b2620]"],
+.ora-shell [class~="light:text-[#4a4335]"],
+.ora-shell [class~="light:text-[#6b6255]"],
+.ora-shell [class~="light:text-[#8a7f6d]"],
+.ora-shell [class~="light:text-[#a89e8c"] {
+  color: var(--ora-copy-muted) !important;
+}
+
+.ora-shell [class~="light:text-[#2b2620]"] { color: var(--ora-copy) !important; }
+
+.ora-shell input,
+.ora-shell textarea,
+.ora-shell select,
+.ora-shell button {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.ora-shell input,
+.ora-shell textarea,
+.ora-shell select {
+  color: var(--ora-copy) !important;
+}
+
+.ora-shell input::placeholder,
+.ora-shell textarea::placeholder { color: #637088 !important; opacity: 1; }
+
+.ora-shell .ora-rail button:not(.touch-target):hover,
+.ora-shell .ora-github-rail button:hover {
+  background: rgba(72, 230, 209, 0.07) !important;
+  color: #f0f7ff !important;
+}
+
+.ora-shell .ora-rail .border-b,
+.ora-shell .ora-rail .border-t,
+.ora-shell .ora-composer .border-t { border-color: var(--ora-border) !important; }
+
+.ora-shell .ora-github-rail {
+  box-shadow: inset 1px 0 0 rgba(155, 140, 255, 0.06);
+}
+
+.ora-shell .ora-history-rail {
+  box-shadow: inset -1px 0 0 rgba(155, 140, 255, 0.06);
+}
+
+@media (max-width: 767px) {
+  .ora-shell .ora-rail { background: rgba(9, 13, 23, 0.98) !important; }
+  .ora-shell .ora-history-rail,
+  .ora-shell .ora-github-rail { box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5); }
+}
