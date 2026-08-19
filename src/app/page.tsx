@@ -13,7 +13,7 @@ import AgentExecutionConsole, { type ExecutionLogEntry } from "@/components/Agen
 import TerminalPanel from "@/components/TerminalPanel";
 import ProjectMemoryPanel from "@/components/ProjectMemoryPanel";
 import CollaborationPanel from "@/components/CollaborationPanel";
-import AppearancePanel, { readAppearance, type AppearanceSettings } from "@/components/AppearancePanel";
+import AppearancePanel, { PRESETS, readAppearance, type AppearanceSettings } from "@/components/AppearancePanel";
 import AuthGate from "@/components/AuthGate";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
@@ -768,12 +768,10 @@ function Workspace() {
     setProjectMemory(activeRepo ? loadProjectMemory(activeRepo) : createProjectMemory(""));
   }, [activeRepo]);
   useEffect(() => {
-    const accent = { cyan: "#48e6d1", magenta: "#ff6bb5", lime: "#b7f34a", amber: "#ffc857" }[appearance.accent];
-    const violet = { cyan: "#9b8cff", magenta: "#b691ff", lime: "#55e6c1", amber: "#ff7a9c" }[appearance.accent];
-    const line = { cyan: "rgba(72, 230, 209, .28)", magenta: "rgba(255, 107, 181, .28)", lime: "rgba(183, 243, 74, .28)", amber: "rgba(255, 200, 87, .28)" }[appearance.accent];
-    document.documentElement.style.setProperty("--ora-cyan", accent);
-    document.documentElement.style.setProperty("--ora-violet", violet);
-    document.documentElement.style.setProperty("--ora-line", line);
+    const preset = PRESETS.find((item) => item.id === appearance.preset) ?? PRESETS[0];
+    document.documentElement.style.setProperty("--ora-cyan", preset.cyan);
+    document.documentElement.style.setProperty("--ora-violet", preset.violet);
+    document.documentElement.style.setProperty("--ora-line", preset.line);
     document.documentElement.dataset.oraAccent = appearance.accent;
     document.documentElement.dataset.oraDensity = appearance.density;
     try { localStorage.setItem("ora:appearance", JSON.stringify(appearance)); } catch { /* optional persistence */ }
@@ -889,6 +887,8 @@ function Workspace() {
             <button
               onClick={() => setAgentMode((v) => !v)}
               disabled={loading}
+              aria-pressed={agentMode}
+              aria-label={`Switch to ${agentMode ? "Chat" : "Agent"} mode`}
               className={`touch-target disabled:opacity-50 rounded-lg px-2.5 text-xs font-medium transition-colors ${
                 agentMode
                   ? "bg-violet-700 text-violet-100 agent-active"
@@ -994,10 +994,10 @@ function Workspace() {
 
         {/* ── Model picker dropdown ─────────────────────────────────────── */}
         {showModelPicker && (
-          <div className="model-command-panel bottom-sheet md:absolute md:top-16 md:left-auto md:right-4 md:bottom-auto md:max-h-[min(680px,calc(100dvh-96px))] md:w-[min(390px,calc(100vw-32px))] md:border md:border-zinc-700 light:md:border-[#e5ded1] md:rounded-2xl md:shadow-2xl">
+          <div className="model-command-panel bottom-sheet md:absolute md:top-16 md:left-auto md:right-4 md:bottom-auto md:max-h-[min(680px,calc(100dvh-96px))] md:w-[min(390px,calc(100vw-32px))] md:border md:border-zinc-700 light:md:border-[#e5ded1] md:rounded-2xl md:shadow-2xl" role="dialog" aria-label="Model selection" aria-modal="true">
             <div className="model-command-header flex items-center justify-between px-5 py-4 border-b border-zinc-800 light:border-[#e5ded1] sticky top-0 bg-zinc-900 light:bg-white z-10">
               <span className="text-zinc-100 light:text-[#2b2620] text-sm font-semibold">Model</span>
-              <button onClick={() => setShowModelPicker(false)} className="touch-target text-zinc-500 hover:text-zinc-200 light:text-[#8a7f6d] light:hover:text-[#2b2620]">
+              <button type="button" onClick={() => setShowModelPicker(false)} className="touch-target text-zinc-500 hover:text-zinc-200 light:text-[#8a7f6d] light:hover:text-[#2b2620]" aria-label="Close model selection">
                 <IconX />
               </button>
             </div>
@@ -1005,6 +1005,8 @@ function Workspace() {
               {/* Auto option */}
               <button
                 onClick={() => { handleProviderChange("auto"); setShowModelPicker(false); }}
+                aria-pressed={selectedProviderId === "auto"}
+                aria-label="Use automatic model routing"
                 className={`model-option w-full text-left px-3 py-3 rounded-xl text-sm transition-colors ${
                   selectedProviderId === "auto"
                     ? "bg-violet-800/40 text-violet-200 border border-violet-700/50"
@@ -1029,6 +1031,8 @@ function Workspace() {
                       <button
                         key={m.id}
                         disabled={!p.configured}
+                        aria-pressed={selectedProviderId === p.id && selectedModel === m.id}
+                        aria-label={`${p.name}: ${baseLabel}${!p.configured ? " (not configured)" : ""}`}
                         onClick={() => {
                           setSelectedProviderId(p.id);
                           setSelectedModel(m.id);
