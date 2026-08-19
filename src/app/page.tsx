@@ -1028,7 +1028,7 @@ function Workspace() {
         )}
 
         {/* ── Messages ─────────────────────────────────────────────────── */}
-        <div className="flex-1 overflow-y-auto px-3 md:px-6 py-4 space-y-4 mobile-scroll">
+        <div className="ora-chat-scroll flex-1 overflow-y-auto px-3 md:px-6 py-5 space-y-5 mobile-scroll">
           {messages.length === 0 && !loading && (
             <div className="ora-empty-state flex flex-col items-center justify-center h-full text-center px-4 gap-5 py-8">
               {/* Hero — smaller on mobile */}
@@ -1138,7 +1138,7 @@ function Workspace() {
 
         {/* ── Input bar ─────────────────────────────────────────────────── */}
         <div
-          className="ora-composer border-t border-zinc-800 light:border-[#e5ded1] bg-zinc-900/90 light:bg-white/90 backdrop-blur-sm flex-shrink-0"
+          className="coding-composer ora-composer border-t border-zinc-800 light:border-[#e5ded1] bg-zinc-900/90 light:bg-white/90 backdrop-blur-sm flex-shrink-0"
           style={{ paddingBottom: kbHeight > 0 ? kbHeight : undefined }}
         >
           <div className="px-3 md:px-4 py-2.5 pb-safe">
@@ -1190,7 +1190,7 @@ function Workspace() {
               </div>
             )}
 
-            <div className="flex items-end gap-1.5">
+            <div className="coding-composer__row flex items-end gap-1.5">
               <LocalFileContext
                 compact
                 onFilesLoaded={(files) => setLocalFiles((prev) => [...prev, ...files])}
@@ -1218,7 +1218,7 @@ function Workspace() {
                   }
                   rows={1}
                   disabled={inputDisabled}
-                  className="input-field w-full px-3.5 py-3 text-[15px] text-left placeholder:text-zinc-600 resize-none min-h-[46px] max-h-[120px] disabled:opacity-40 block"
+                  className="coding-composer__input input-field w-full px-3.5 py-3 text-[15px] text-left placeholder:text-zinc-600 resize-none min-h-[46px] max-h-[120px] disabled:opacity-40 block"
                   style={{ fontSize: "16px", textAlign: "left" }}
                 />
               </div>

@@ -443,35 +443,39 @@ export default function ChatMessage({
 
   return (
     // Improvement #1: max-w-2xl centred so long lines don't span full width
-    <div className="max-w-2xl mx-auto w-full px-2">
+    <div className="coding-message max-w-3xl mx-auto w-full px-2 md:px-4">
       <div
-        className={`flex gap-2 ${isUser ? "flex-row-reverse" : "flex-row"}`}
+        className={`coding-message__row flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
         {/* Avatar dot */}
         <div className={`flex-shrink-0 mt-1 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
-          isUser ? "bg-violet-700 text-violet-100" : "bg-zinc-700 light:bg-[#ddd3bd] text-zinc-300 light:text-[#4a4335]"
+          isUser ? "coding-message__avatar--user bg-violet-700 text-violet-100" : "coding-message__avatar--assistant bg-zinc-700 light:bg-[#ddd3bd] text-zinc-300 light:text-[#4a4335]"
         }`}>
           {isUser ? "Y" : "AI"}
         </div>
 
-        <div className={`flex flex-col gap-1 min-w-0 flex-1 ${isUser ? "items-end" : "items-start"}`}>
+        <div className={`coding-message__body flex flex-col gap-1 min-w-0 flex-1 ${isUser ? "items-end" : "items-start"}`}>
+          <div className={`coding-message__role ${isUser ? "coding-message__role--user" : "coding-message__role--assistant"}`}>
+            <span>{isUser ? "YOU" : "ORA"}</span>
+            {!isUser && routingBadge && <span className="coding-message__route">{routingBadge.provider} · {routingBadge.model}</span>}
+          </div>
           {/* Bubble */}
           <div className="relative group w-full">
             <div
-              className={`rounded-2xl px-4 py-3 ${
+              className={`coding-message__surface rounded-2xl px-4 py-3 ${
                 isUser
                   // Improvement #2: violet tint for user messages instead of teal-800
-                  ? "bg-violet-950/50 light:bg-violet-50 border border-violet-800/40 light:border-violet-200 text-violet-50 light:text-violet-900 rounded-tr-sm"
-                  : "bg-zinc-800/80 light:bg-white border border-zinc-700/50 light:border-[#e5ded1] text-zinc-100 light:text-[#2b2620] rounded-tl-sm"
+                  ? "coding-message__surface--user bg-violet-950/50 light:bg-violet-50 border border-violet-800/40 light:border-violet-200 text-violet-50 light:text-violet-900 rounded-tr-sm"
+                  : "coding-message__surface--assistant bg-zinc-800/80 light:bg-white border border-zinc-700/50 light:border-[#e5ded1] text-zinc-100 light:text-[#2b2620] rounded-tl-sm"
               }`}
             >
               {isUser ? (
                 // Improvement #4: 15px text, relaxed leading
                 <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{message.content}</p>
               ) : (
-                <div className="prose prose-invert light:prose-slate max-w-none text-[15px] leading-relaxed prose-p:leading-relaxed prose-p:my-2 prose-headings:text-zinc-100 light:prose-headings:text-[#2b2620] prose-headings:font-semibold prose-strong:text-zinc-100 light:prose-strong:text-[#2b2620] prose-li:my-0.5">
+                <div className="coding-markdown prose prose-invert light:prose-slate max-w-none text-[15px] leading-relaxed prose-p:leading-relaxed prose-p:my-2 prose-headings:text-zinc-100 light:prose-headings:text-[#2b2620] prose-headings:font-semibold prose-strong:text-zinc-100 light:prose-strong:text-[#2b2620] prose-li:my-0.5">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
@@ -546,7 +550,7 @@ export default function ChatMessage({
           </div>
 
           {/* Footer: timestamp + token info + regenerate */}
-          <div className={`flex items-center gap-3 px-1 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
+          <div className={`coding-message__footer flex items-center gap-3 px-1 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
             {/* Improvement #6: timestamp */}
             {message.createdAt && (
               <span className="text-[11px] text-zinc-600 light:text-[#a89e8c]">

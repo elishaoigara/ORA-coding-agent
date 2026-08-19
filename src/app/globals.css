@@ -765,3 +765,158 @@ html:not(.light) body {
 .light .ora-shell .ora-rail .h-1\.5 { background-color: #1a2436 !important; }
 .light .ora-shell .ora-rail [class*="bg-white"],
 .light .ora-shell .ora-rail [class*="bg-\\[\\#"] { background-color: var(--ora-panel) !important; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   STANDARD CODING-AGENT CHAT
+   Conversation-first hierarchy: assistant turns read like documents, user
+   turns read like focused task prompts, and the composer stays docked.
+   ────────────────────────────────────────────────────────────────────────── */
+.ora-chat-scroll {
+  scroll-behavior: smooth;
+  background: linear-gradient(180deg, rgba(8, 11, 19, 0.22), rgba(8, 11, 19, 0.58));
+}
+
+.coding-message { animation: coding-message-in .18s ease-out both; }
+@keyframes coding-message-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+.coding-message__row { align-items: flex-start; }
+.coding-message__avatar--assistant,
+.coding-message__avatar--user {
+  width: 28px !important;
+  height: 28px !important;
+  margin-top: 26px !important;
+  border: 1px solid rgba(139, 157, 190, 0.24);
+  box-shadow: 0 0 18px rgba(72, 230, 209, 0.08);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px !important;
+  letter-spacing: .04em;
+}
+
+.coding-message__avatar--assistant {
+  background: linear-gradient(135deg, rgba(72, 230, 209, .32), rgba(155, 140, 255, .45)) !important;
+  color: #e8fbff !important;
+  border-color: rgba(72, 230, 209, .46);
+}
+
+.coding-message__avatar--user {
+  background: rgba(155, 140, 255, .22) !important;
+  color: #ded8ff !important;
+  border-color: rgba(155, 140, 255, .4);
+}
+
+.coding-message__role {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 20px;
+  padding: 0 3px;
+  font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .14em;
+}
+
+.coding-message__role--assistant { color: var(--ora-cyan); }
+.coding-message__role--user { color: #b7aaff; }
+.coding-message__route {
+  color: #56657d;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: .02em;
+  text-transform: none;
+}
+
+.coding-message__surface {
+  width: 100%;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.1);
+}
+
+.coding-message__surface--assistant {
+  padding: 2px 0 !important;
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none;
+  color: #d2dbea !important;
+}
+
+.coding-message__surface--user {
+  width: auto;
+  max-width: min(720px, 92%);
+  background: linear-gradient(135deg, rgba(92, 70, 184, .28), rgba(44, 35, 91, .54)) !important;
+  border-color: rgba(155, 140, 255, .27) !important;
+  color: #eeeaff !important;
+}
+
+.coding-markdown { color: #d2dbea; }
+.coding-markdown > :first-child { margin-top: 0 !important; }
+.coding-markdown > :last-child { margin-bottom: 0 !important; }
+.coding-markdown p { color: #c6d0e0; }
+.coding-markdown h1,
+.coding-markdown h2,
+.coding-markdown h3,
+.coding-markdown h4 { color: #f0f5ff !important; letter-spacing: -.025em; }
+.coding-markdown a { color: var(--ora-cyan) !important; text-decoration-color: rgba(72, 230, 209, .4); }
+.coding-markdown ul,
+.coding-markdown ol { padding-left: 1.25rem; }
+.coding-markdown blockquote {
+  margin: 14px 0;
+  padding: 10px 14px;
+  border-left: 2px solid var(--ora-violet);
+  background: rgba(155, 140, 255, .06);
+  color: #aebbd0;
+}
+
+.coding-message__footer {
+  min-height: 22px;
+  color: #53627a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.coding-message__footer button { color: #53627a !important; }
+.coding-message__footer button:hover { color: var(--ora-cyan) !important; }
+
+.coding-composer {
+  box-shadow: 0 -12px 28px rgba(0, 0, 0, .15);
+}
+
+.coding-composer__row {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 6px 0 2px;
+  border: 1px solid rgba(139, 157, 190, .18);
+  border-radius: 16px;
+  background: rgba(13, 18, 32, .76);
+  box-shadow: 0 0 0 4px rgba(72, 230, 209, .025), inset 0 1px 0 rgba(255, 255, 255, .025);
+}
+
+.coding-composer__input {
+  min-height: 44px !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.coding-composer__input:focus { border: 0 !important; box-shadow: none !important; }
+.coding-composer__row > button,
+.coding-composer__row > div:last-child button { border-radius: 11px; }
+.coding-composer__row > div:first-child { margin-left: 4px; }
+.coding-composer__row > div:last-child { margin-right: 4px; }
+
+.coding-composer .ora-status-pill,
+.coding-composer [class*="rounded-full"] { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+@media (max-width: 767px) {
+  .ora-chat-scroll { padding-left: 10px !important; padding-right: 10px !important; padding-top: 14px !important; padding-bottom: 16px !important; }
+  .coding-message { padding-left: 0 !important; padding-right: 0 !important; }
+  .coding-message__row { gap: 8px; }
+  .coding-message__avatar--assistant,
+  .coding-message__avatar--user { width: 24px !important; height: 24px !important; margin-top: 25px !important; }
+  .coding-message__surface--user { max-width: 94%; }
+  .coding-message__surface { padding-left: 12px !important; padding-right: 12px !important; }
+  .coding-message__surface--assistant { padding-left: 0 !important; padding-right: 0 !important; }
+  .coding-markdown { font-size: 14px !important; }
+  .coding-composer__row { margin-left: 0; margin-right: 0; border-radius: 14px; padding-top: 4px; padding-bottom: 4px; }
+  .coding-composer__row > div:first-child { margin-left: 1px; }
+  .coding-composer__row > div:last-child { margin-right: 1px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coding-message { animation: none; }
+}
