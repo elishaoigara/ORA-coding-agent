@@ -13,6 +13,7 @@ import AgentExecutionConsole, { type ExecutionLogEntry } from "@/components/Agen
 import TerminalPanel from "@/components/TerminalPanel";
 import ProjectMemoryPanel from "@/components/ProjectMemoryPanel";
 import CollaborationPanel from "@/components/CollaborationPanel";
+import AppearancePanel, { readAppearance, type AppearanceSettings } from "@/components/AppearancePanel";
 import AuthGate from "@/components/AuthGate";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
@@ -147,6 +148,8 @@ function Workspace() {
   const [showTerminal, setShowTerminal]   = useState(false);
   const [showMemory, setShowMemory]       = useState(false);
   const [showCollaboration, setShowCollaboration] = useState(false);
+  const [showAppearance, setShowAppearance] = useState(false);
+  const [appearance, setAppearance] = useState<AppearanceSettings>(() => readAppearance());
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [projectInput, setProjectInput]   = useState("");
   const [projectMemory, setProjectMemory] = useState<ProjectMemory>(() => createProjectMemory(""));
@@ -757,13 +760,24 @@ function Workspace() {
   }
 
   const closeAll = useCallback(() => {
-    setShowHistory(false); setShowGitHub(false); setShowModelPicker(false); setShowTerminal(false); setShowMemory(false); setShowCollaboration(false);
+    setShowHistory(false); setShowGitHub(false); setShowModelPicker(false); setShowTerminal(false); setShowMemory(false); setShowCollaboration(false); setShowAppearance(false);
   }, []);
 
   useEffect(() => { closeAll(); }, [activeId, closeAll]);
   useEffect(() => {
     setProjectMemory(activeRepo ? loadProjectMemory(activeRepo) : createProjectMemory(""));
   }, [activeRepo]);
+  useEffect(() => {
+    const accent = { cyan: "#48e6d1", magenta: "#ff6bb5", lime: "#b7f34a", amber: "#ffc857" }[appearance.accent];
+    const violet = { cyan: "#9b8cff", magenta: "#b691ff", lime: "#55e6c1", amber: "#ff7a9c" }[appearance.accent];
+    const line = { cyan: "rgba(72, 230, 209, .28)", magenta: "rgba(255, 107, 181, .28)", lime: "rgba(183, 243, 74, .28)", amber: "rgba(255, 200, 87, .28)" }[appearance.accent];
+    document.documentElement.style.setProperty("--ora-cyan", accent);
+    document.documentElement.style.setProperty("--ora-violet", violet);
+    document.documentElement.style.setProperty("--ora-line", line);
+    document.documentElement.dataset.oraAccent = appearance.accent;
+    document.documentElement.dataset.oraDensity = appearance.density;
+    try { localStorage.setItem("ora:appearance", JSON.stringify(appearance)); } catch { /* optional persistence */ }
+  }, [appearance]);
 
   // Bug fix #2: explicit isAgentBusy check
   const isAgentBusy   = agentPhase === "planning" || agentPhase === "executing";
@@ -792,7 +806,7 @@ function Workspace() {
           and the model picker is a small anchored dropdown, so a full-screen
           dimmed backdrop has nothing to justify and would otherwise cover the
           whole app and swallow every click until manually dismissed. */}
-      {(showHistory || showGitHub || showModelPicker || showTerminal || showMemory || showCollaboration) && (
+      {(showHistory || showGitHub || showModelPicker || showTerminal || showMemory || showCollaboration || showAppearance) && (
         <div className="mobile-overlay md:hidden" onClick={closeAll} />
       )}
 
@@ -849,6 +863,15 @@ function Workspace() {
           {/* Right: theme + model pill + mode + github + new */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <ThemeToggleButton />
+            <button
+              type="button"
+              onClick={() => setShowAppearance((v) => !v)}
+              className={`workspace-tool-toggle touch-target ${showAppearance ? "is-active" : ""}`}
+              aria-label="Appearance settings"
+              title="Appearance settings"
+            >
+              <span className="workspace-tool-toggle__glyph">✦</span>
+            </button>
 
             <button
               onClick={() => setShowModelPicker((v) => !v)}
@@ -1141,6 +1164,11 @@ function Workspace() {
           <div ref={bottomRef} />
         </div>
 
+        {showAppearance && (
+          <div className="appearance-dock">
+            <AppearancePanel settings={appearance} onChange={setAppearance} onClose={() => setShowAppearance(false)} />
+          </div>
+        )}
         {showMemory && activeRepo && (
           <div className="memory-dock">
             <ProjectMemoryPanel memory={projectMemory} onChange={setProjectMemory} onClose={() => setShowMemory(false)} />
