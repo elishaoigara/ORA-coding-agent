@@ -1191,3 +1191,57 @@ html:not(.light) body {
   .memory-panel__header, .collab-panel__header, .memory-panel__footer, .collab-panel__footer { padding-left: 11px; padding-right: 11px; }
   .memory-list { grid-column: span 1; }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   CHAT CONTAINMENT PASS
+   Keep answer surfaces, metadata, code, and controls in independent flow.
+   ────────────────────────────────────────────────────────────────────────── */
+.coding-message { min-width: 0; overflow: visible; }
+.coding-message__row { min-width: 0; }
+.coding-message__body { min-width: 0; max-width: 100%; }
+.coding-message__surface { min-width: 0; overflow: visible; overflow-wrap: anywhere; }
+.coding-message__surface--assistant { padding-top: 4px !important; padding-bottom: 4px !important; }
+.coding-message__surface--user { overflow-wrap: anywhere; }
+.coding-message__role { flex-wrap: wrap; row-gap: 4px; }
+.coding-message__route { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coding-message__footer { min-width: 0; flex-wrap: wrap; row-gap: 4px; }
+.coding-message__footer > span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coding-message__footer button { flex-shrink: 0; }
+.coding-markdown { min-width: 0; overflow-wrap: anywhere; }
+.coding-markdown pre { max-width: 100%; overflow-x: auto !important; overflow-y: hidden; white-space: pre; border-radius: 12px; }
+.coding-markdown img { max-width: 100%; height: auto; border-radius: 10px; }
+.coding-markdown .relative { max-width: 100%; }
+.coding-markdown table { width: max-content; min-width: 100%; }
+.ora-empty-state { min-height: min(620px, 100%); }
+.ora-prompt-chip { min-height: 78px; overflow-wrap: anywhere; }
+.coding-composer { position: relative; z-index: 20; }
+.coding-composer__row { min-width: 0; }
+.coding-composer__input { width: 100%; min-width: 0; max-height: 180px; overflow-y: auto; overflow-wrap: anywhere; }
+
+@media (max-width: 767px) {
+  .ora-topbar { min-height: 56px; gap: 4px; padding-left: 8px !important; padding-right: 8px !important; }
+  .ora-topbar > span { min-width: 0; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ora-topbar .workspace-tool-toggle { width: 34px; height: 34px; }
+  .ora-chat-scroll { min-height: 0; overscroll-behavior: contain; }
+  .coding-message { width: 100%; max-width: none !important; padding-left: 0 !important; padding-right: 0 !important; }
+  .coding-message__row { gap: 7px; }
+  .coding-message__body { max-width: calc(100% - 31px); }
+  .coding-message__role { font-size: 9px; letter-spacing: .1em; }
+  .coding-message__surface--user { max-width: 100%; }
+  .coding-markdown { font-size: 14px !important; line-height: 1.62 !important; }
+  .coding-markdown pre { font-size: 11px !important; margin-left: -3px !important; margin-right: -3px !important; max-width: calc(100% + 6px); }
+  .coding-markdown table { font-size: 12px; }
+  .ora-empty-state { min-height: 100%; padding-top: 32px !important; padding-bottom: 24px !important; }
+  .ora-prompt-chip { min-height: 0; padding: 11px !important; }
+  .coding-composer { padding-bottom: env(safe-area-inset-bottom); }
+  .coding-composer > div { padding-left: 10px !important; padding-right: 10px !important; }
+  .coding-composer__row { gap: 4px; }
+  .coding-composer__input { min-height: 42px !important; }
+}
+
+@media (max-width: 420px) {
+  .ora-prompt-chip { font-size: 11px !important; }
+  .coding-message__avatar--assistant, .coding-message__avatar--user { width: 22px !important; height: 22px !important; margin-top: 23px !important; }
+  .coding-message__body { max-width: calc(100% - 29px); }
+  .coding-message__footer { gap: 6px; font-size: 10px; }
+}

@@ -429,7 +429,6 @@ export default function ChatMessage({
 }: Props) {
   const isUser   = message.role === "user";
   const isSystem = message.role === "system";
-  const [hovered, setHovered] = useState(false);
 
   if (isSystem) {
     return (
@@ -446,8 +445,6 @@ export default function ChatMessage({
     <div className="coding-message max-w-3xl mx-auto w-full px-2 md:px-4">
       <div
         className={`coding-message__row flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
       >
         {/* Avatar dot */}
         <div className={`flex-shrink-0 mt-1 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
@@ -538,15 +535,6 @@ export default function ChatMessage({
               )}
             </div>
 
-            {/* Improvement #3: inline copy button — appears on hover, top-right corner.
-                Always visible below md: `hovered` is driven by mouse enter/leave, which
-                touch devices never fire, so a hover-only reveal would make this button
-                permanently invisible (though still technically tappable) on mobile. */}
-            <div className={`absolute top-2 ${isUser ? "left-2" : "right-2"} transition-opacity duration-150 opacity-100 md:opacity-0 ${
-              hovered ? "md:opacity-100" : ""
-            }`}>
-              <CopyButton text={message.content} iconOnly />
-            </div>
           </div>
 
           {/* Footer: timestamp + token info + regenerate */}
@@ -567,6 +555,7 @@ export default function ChatMessage({
             )}
             {!isUser && <TokenBadge message={message} />}
             {!isUser && onRegenerate && <RegenerateButton onClick={onRegenerate} />}
+            <CopyButton text={message.content} iconOnly className="ml-auto" />
           </div>
         </div>
       </div>
