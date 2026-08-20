@@ -19,6 +19,7 @@ import AppearancePanel, { PRESETS, readAppearance, type AppearanceSettings, type
 import AuthGate from "@/components/AuthGate";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
+import { useMobileDrawerGestures } from "@/hooks/useMobileDrawerGestures";
 import { buildTokenUsage, sumUsage, formatCost } from "@/lib/tokenCost";
 import { resolveModel, type ProviderId } from "@/lib/providers";
 import { SYSTEM_PROMPT_TEMPLATES, type PromptTemplate } from "@/lib/promptTemplates";
@@ -381,6 +382,14 @@ function Workspace() {
   useEffect(() => { lsSet("ora:selected-sound-pack", selectedSoundPackId); }, [selectedSoundPackId]);
   useEffect(() => { lsSet("ora:display-name", personalDisplayName.trim() || "Lambert"); }, [personalDisplayName]);
 
+  useMobileDrawerGestures({
+    onOpenHistory: () => { setShowGitHub(false); setShowHistory(true); },
+    onOpenGitHub: () => { setShowHistory(false); setShowGitHub(true); },
+    onCloseHistory: () => setShowHistory(false),
+    onCloseGitHub: () => setShowGitHub(false),
+    historyOpen: showHistory,
+    githubOpen: showGitHub,
+  });
   useKeyboardShortcuts({
     onSend:          () => !loading && sendMessage(),
     onNewChat:       handleNewChat,

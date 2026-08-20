@@ -1423,3 +1423,31 @@ button:disabled, input:disabled, textarea:disabled, select:disabled { cursor: no
   .ora-topbar .ora-model-trigger { max-width: 82px; }
   .ora-topbar .ora-model-trigger > span:nth-child(3) { display: none; }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   MOBILE TOUCH UX
+   ────────────────────────────────────────────────────────────────────────── */
+.touch-target { min-width: 44px; min-height: 44px; }
+
+@media (max-width: 767px) {
+  .ora-shell button, .ora-shell [role="button"] { -webkit-tap-highlight-color: transparent; }
+  .ora-history-rail::after, .ora-github-rail::after {
+    content: "";
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    width: 34px;
+    height: 3px;
+    border-radius: 99px;
+    background: rgba(139, 157, 190, .34);
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+  .ora-history-rail, .ora-github-rail { touch-action: pan-y; }
+  .ora-topbar .workspace-tool-toggle,
+  .ora-topbar .touch-target { min-width: 40px; min-height: 40px; }
+  .ora-chat-scroll { padding-bottom: max(16px, env(safe-area-inset-bottom)) !important; }
+  .coding-composer { padding-bottom: max(8px, env(safe-area-inset-bottom)) !important; }
+  .coding-composer button, .coding-composer [role="button"] { min-width: 44px; min-height: 44px; }
+  .coding-composer__input { font-size: 16px !important; }
+}
