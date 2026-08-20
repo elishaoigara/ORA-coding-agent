@@ -21,6 +21,7 @@ import { buildTokenUsage, sumUsage, formatCost } from "@/lib/tokenCost";
 import { resolveModel, type ProviderId } from "@/lib/providers";
 import { SYSTEM_PROMPT_TEMPLATES, type PromptTemplate } from "@/lib/promptTemplates";
 import { estimatePromptTokens } from "@/lib/promptTokens";
+import { extractPromptVariables, resolvePromptVariables } from "@/lib/promptVariables";
 import type { Message, InjectedFile, PublicProvider, GitHubContext } from "@/types";
 import type { StagedFile } from "@/lib/agentTools";
 import type { AgentPlan } from "@/lib/agent/types";
@@ -182,6 +183,10 @@ function Workspace() {
     try { return JSON.parse(lsGet("ora:custom-prompt-templates", "[]")) as PromptTemplate[]; } catch { return []; }
   });
   const [templateNameDraft, setTemplateNameDraft] = useState("");
+  const [promptVariables, setPromptVariables] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(lsGet("ora:prompt-variables", "{}")) as Record<string, string>; } catch { return {}; }
+  });
+  const promptImportRef = useRef<HTMLInputElement>(null);
   const [branchFirst, setBranchFirst]     = useState(false);
     const [agentBranch, setAgentBranch] = useState(""); // UI improvement #7
   const [executionLogs, setExecutionLogs] = useState<ExecutionLogEntry[]>([]);
@@ -227,6 +232,7 @@ function Workspace() {
   const activePromptTemplateIndex = promptTemplates.findIndex((template) => template.prompt === systemPrompt);
   const activePromptTemplate = activePromptTemplateIndex >= 0 ? promptTemplates[activePromptTemplateIndex] : null;
   const promptTokenCount = estimatePromptTokens(systemPrompt);
+  const promptVariableNames = extractPromptVariables(systemPrompt);
 
   const cycleSystemPromptTemplate = useCallback(() => {
     const nextIndex = activePromptTemplateIndex >= 0
@@ -255,6 +261,48 @@ function Workspace() {
     persistCustomPromptTemplates(customPromptTemplates.filter((template) => template.id !== id));
   }, [customPromptTemplates, persistCustomPromptTemplates]);
 
+  const updatePromptVariable = useCallback((name: string, value: string) => {
+    setPromptVariables((current) => {
+      const next = { ...current, [name]: value };
+      lsSet("ora:prompt-variables", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const exportCustomPromptTemplates = useCallback(() => {
+    const payload = { version: 1, exportedAt: new Date().toISOString(), templates: customPromptTemplates };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "ora-prompt-templates.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, [customPromptTemplates]);
+
+  const importCustomPromptTemplates = useCallback(async (file: File) => {
+    try {
+      const parsed = JSON.parse(await file.text()) as { templates?: PromptTemplate[] } | PromptTemplate[];
+      const incoming = Array.isArray(parsed) ? parsed : parsed.templates;
+      if (!Array.isArray(incoming)) throw new Error("JSON must contain a templates array");
+      const valid = incoming.filter((template): template is PromptTemplate => Boolean(
+        template && typeof template.id === "string" && /^[a-z0-9_-]+$/i.test(template.id) &&
+        typeof template.label === "string" && template.label.trim() && template.label.length <= 80 &&
+        typeof template.prompt === "string" && template.prompt.trim() && template.prompt.length <= 20_000
+      )).slice(0, 20);
+      if (!valid.length) throw new Error("No valid prompt templates found");
+      const merged = [...customPromptTemplates];
+      for (const template of valid) {
+        const index = merged.findIndex((existing) => existing.id === template.id);
+        if (index >= 0) merged[index] = template;
+        else if (merged.length < 20) merged.push(template);
+      }
+      persistCustomPromptTemplates(merged);
+    } catch (error) {
+      setProfileStatus(error instanceof Error ? error.message : "Prompt import failed");
+    }
+  }, [customPromptTemplates, persistCustomPromptTemplates]);
+
   const persistSoundPacks = useCallback((next: SoundPack[]) => {
     setSoundPacks(next);
     lsSet("ora:sound-packs", JSON.stringify(next));
@@ -276,10 +324,10 @@ function Workspace() {
     try {
       const query = profileGistId ? `?gistId=${encodeURIComponent(profileGistId)}` : "";
       const response = await fetch(`/api/profile${query}`);
-      const data = await response.json() as { error?: string; gistId?: string | null; profile?: { appearance: AppearanceSettings; soundPacks: SoundPack[]; customPromptTemplates?: PromptTemplate[] } | null };
+      const data = await response.json() as { error?: string; gistId?: string | null; profile?: { appearance: AppearanceSettings; soundPacks: SoundPack[]; customPromptTemplates?: PromptTemplate[]; promptVariables?: Record<string, string> } | null };
       if (!response.ok || data.error) throw new Error(data.error || "Profile pull failed");
       if (data.gistId) { setProfileGistId(data.gistId); lsSet("ora:profile-gist", data.gistId); }
-      if (data.profile) { setAppearance(data.profile.appearance); persistSoundPacks(data.profile.soundPacks); persistCustomPromptTemplates(data.profile.customPromptTemplates ?? []); const selected = data.profile.soundPacks[0]?.id ?? ""; setSelectedSoundPackId(selected); lsSet("ora:selected-sound-pack", selected); }
+      if (data.profile) { setAppearance(data.profile.appearance); persistSoundPacks(data.profile.soundPacks); persistCustomPromptTemplates(data.profile.customPromptTemplates ?? []); setPromptVariables(data.profile.promptVariables ?? {}); lsSet("ora:prompt-variables", JSON.stringify(data.profile.promptVariables ?? {})); const selected = data.profile.soundPacks[0]?.id ?? ""; setSelectedSoundPackId(selected); lsSet("ora:selected-sound-pack", selected); }
       setProfileStatus(data.profile ? "Synced from private Gist" : "No remote profile yet");
     } catch (error) { setProfileStatus(error instanceof Error ? error.message : "Profile pull failed"); }
   }, [persistCustomPromptTemplates, persistSoundPacks, profileGistId]);
@@ -287,13 +335,13 @@ function Workspace() {
   const pushPersonalProfile = useCallback(async () => {
     setProfileStatus("Pushing private profile…");
     try {
-      const response = await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gistId: profileGistId || undefined, appearance, soundPacks, customPromptTemplates }) });
+      const response = await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gistId: profileGistId || undefined, appearance, soundPacks, customPromptTemplates, promptVariables }) });
       const data = await response.json() as { error?: string; gistId?: string | null };
       if (!response.ok || data.error) throw new Error(data.error || "Profile push failed");
       if (data.gistId) { setProfileGistId(data.gistId); lsSet("ora:profile-gist", data.gistId); }
       setProfileStatus("Synced to private Gist");
     } catch (error) { setProfileStatus(error instanceof Error ? error.message : "Profile push failed"); }
-  }, [appearance, customPromptTemplates, profileGistId, soundPacks]);
+  }, [appearance, customPromptTemplates, profileGistId, promptVariables, soundPacks]);
 
   useEffect(() => { lsSet("ora:selected-sound-pack", selectedSoundPackId); }, [selectedSoundPackId]);
 
@@ -375,8 +423,9 @@ function Workspace() {
     setMessages([...newMessages, { role: "assistant", content: "", createdAt: now }]);
     setLoading(true);
     const assistantIndex = newMessages.length;
-    const messagesWithSystem: Message[] = systemPrompt.trim()
-      ? [{ role: "system", content: systemPrompt.trim() }, ...newMessages]
+    const resolvedSystemPrompt = resolvePromptVariables(systemPrompt.trim(), promptVariables);
+    const messagesWithSystem: Message[] = resolvedSystemPrompt
+      ? [{ role: "system", content: resolvedSystemPrompt }, ...newMessages]
       : newMessages;
     const contextFiles = Array.from(
       new Map([...injectedFiles, ...localFiles].map((file) => [file.path, file])).values()
@@ -1190,6 +1239,18 @@ function Workspace() {
                 className="system-prompt-editor input-field w-full px-3 py-2 text-sm placeholder:text-zinc-600 resize-none"
                 aria-describedby="system-prompt-help"
               />
+              {promptVariableNames.length > 0 && (
+                <div className="system-prompt-variables" aria-label="Prompt variables">
+                  <div className="system-prompt-variables__title">PROMPT VARIABLES</div>
+                  {promptVariableNames.map((name) => (
+                    <label key={name} className="system-prompt-variable">
+                      <span>{`{{${name}}}`}</span>
+                      <input value={promptVariables[name] ?? ""} onChange={(e) => updatePromptVariable(name, e.target.value)} placeholder={`Value for ${name}`} aria-label={`Value for ${name}`} />
+                    </label>
+                  ))}
+                  <p className="system-prompt-section__footer">Values are substituted only when a message is sent.</p>
+                </div>
+              )}
               <div className="system-prompt-save-row">
                 <input
                   value={templateNameDraft}
@@ -1211,6 +1272,11 @@ function Workspace() {
                   ))}
                 </div>
               )}
+              <div className="system-prompt-transfer-row">
+                <input ref={promptImportRef} type="file" accept="application/json,.json" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void importCustomPromptTemplates(file); event.currentTarget.value = ""; }} />
+                <button type="button" className="system-prompt-transfer-button" onClick={() => promptImportRef.current?.click()}>Import JSON</button>
+                <button type="button" className="system-prompt-transfer-button" onClick={exportCustomPromptTemplates} disabled={customPromptTemplates.length === 0}>Export JSON</button>
+              </div>
               <p id="system-prompt-help" className="system-prompt-section__footer">Approximate count · 4 characters ≈ 1 token · Saved locally and included in profile sync</p>
             </section>
           </div>

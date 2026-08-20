@@ -201,6 +201,7 @@ export const profileSyncSchema = z.object({
   }),
   soundPacks: z.array(profileSoundPackSchema).max(3),
   customPromptTemplates: z.array(profilePromptTemplateSchema).max(20),
+  promptVariables: z.record(z.string().trim().min(1).max(40).regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/), z.string().max(200)).refine((values) => Object.keys(values).length <= 20, "Too many prompt variables"),
 });
 export type ProfileSyncRequest = z.infer<typeof profileSyncSchema>;
 
