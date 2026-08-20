@@ -185,6 +185,12 @@ const profileSoundPackSchema = z.object({
   dataUrl: z.string().regex(/^data:audio\/(wav|mpeg|ogg|webm);base64,[A-Za-z0-9+/=]+$/).max(360_000),
 });
 
+const profilePromptTemplateSchema = z.object({
+  id: z.string().trim().min(1).max(100).regex(/^[a-z0-9_-]+$/i),
+  label: z.string().trim().min(1).max(80),
+  prompt: z.string().trim().min(1).max(20_000),
+});
+
 export const profileSyncSchema = z.object({
   gistId: z.string().trim().max(200).optional(),
   appearance: z.object({
@@ -194,6 +200,7 @@ export const profileSyncSchema = z.object({
     soundEnabled: z.boolean(),
   }),
   soundPacks: z.array(profileSoundPackSchema).max(3),
+  customPromptTemplates: z.array(profilePromptTemplateSchema).max(20),
 });
 export type ProfileSyncRequest = z.infer<typeof profileSyncSchema>;
 

@@ -8,7 +8,7 @@ const PROFILE_FILE = "ora-profile.json";
 const MAX_TOTAL_BYTES = 900_000;
 
 type SoundPack = ProfileSyncRequest["soundPacks"][number];
-type ProfilePayload = { updatedAt: number; appearance: ProfileSyncRequest["appearance"]; soundPacks: Array<Omit<SoundPack, "dataUrl"> & { file: string }> };
+type ProfilePayload = { updatedAt: number; appearance: ProfileSyncRequest["appearance"]; soundPacks: Array<Omit<SoundPack, "dataUrl"> & { file: string }>; customPromptTemplates?: ProfileSyncRequest["customPromptTemplates"] };
 type GistFile = { content?: string };
 type Gist = { id: string; files: Record<string, GistFile> };
 
@@ -51,6 +51,7 @@ function hydrateProfile(profile: ProfilePayload | null, gist: Gist | null) {
       const dataUrl = gist.files?.[pack.file]?.content;
       return dataUrl ? [{ id: pack.id, name: pack.name, mime: pack.mime, dataUrl }] : [];
     }),
+    customPromptTemplates: profile.customPromptTemplates ?? [],
   };
 }
 
@@ -61,7 +62,7 @@ function profileFiles(payload: ProfileSyncRequest, updatedAt: number) {
     files[safeFile] = { content: pack.dataUrl };
     return { id: pack.id, name: pack.name, mime: pack.mime, file: safeFile };
   });
-  const profile: ProfilePayload = { updatedAt, appearance: payload.appearance, soundPacks: packs };
+  const profile: ProfilePayload = { updatedAt, appearance: payload.appearance, soundPacks: packs, customPromptTemplates: payload.customPromptTemplates };
   files[PROFILE_FILE] = { content: JSON.stringify(profile, null, 2) };
   return files;
 }

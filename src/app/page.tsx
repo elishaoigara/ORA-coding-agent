@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import GitHubSidebar from "@/components/GitHubSidebar";
 import ChatMessage from "@/components/ChatMessage";
 import ConversationList from "@/components/ConversationList";
@@ -19,7 +19,7 @@ import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
 import { buildTokenUsage, sumUsage, formatCost } from "@/lib/tokenCost";
 import { resolveModel, type ProviderId } from "@/lib/providers";
-import { SYSTEM_PROMPT_TEMPLATES } from "@/lib/promptTemplates";
+import { SYSTEM_PROMPT_TEMPLATES, type PromptTemplate } from "@/lib/promptTemplates";
 import { estimatePromptTokens } from "@/lib/promptTokens";
 import type { Message, InjectedFile, PublicProvider, GitHubContext } from "@/types";
 import type { StagedFile } from "@/lib/agentTools";
@@ -178,6 +178,10 @@ function Workspace() {
   const [localFiles, setLocalFiles]       = useState<InjectedFile[]>([]);
   const [convUsage, setConvUsage]         = useState<TokenUsage | null>(null);
   const [systemPrompt, setSystemPrompt]   = useState("");
+  const [customPromptTemplates, setCustomPromptTemplates] = useState<PromptTemplate[]>(() => {
+    try { return JSON.parse(lsGet("ora:custom-prompt-templates", "[]")) as PromptTemplate[]; } catch { return []; }
+  });
+  const [templateNameDraft, setTemplateNameDraft] = useState("");
   const [branchFirst, setBranchFirst]     = useState(false);
     const [agentBranch, setAgentBranch] = useState(""); // UI improvement #7
   const [executionLogs, setExecutionLogs] = useState<ExecutionLogEntry[]>([]);
@@ -219,18 +223,37 @@ function Workspace() {
     forceSync,
   } = useConversations();
 
-  const activePromptTemplateIndex = SYSTEM_PROMPT_TEMPLATES.findIndex((template) => template.prompt === systemPrompt);
-  const activePromptTemplate = activePromptTemplateIndex >= 0 ? SYSTEM_PROMPT_TEMPLATES[activePromptTemplateIndex] : null;
+  const promptTemplates = useMemo(() => [...SYSTEM_PROMPT_TEMPLATES, ...customPromptTemplates], [customPromptTemplates]);
+  const activePromptTemplateIndex = promptTemplates.findIndex((template) => template.prompt === systemPrompt);
+  const activePromptTemplate = activePromptTemplateIndex >= 0 ? promptTemplates[activePromptTemplateIndex] : null;
   const promptTokenCount = estimatePromptTokens(systemPrompt);
 
   const cycleSystemPromptTemplate = useCallback(() => {
     const nextIndex = activePromptTemplateIndex >= 0
-      ? (activePromptTemplateIndex + 1) % SYSTEM_PROMPT_TEMPLATES.length
+      ? (activePromptTemplateIndex + 1) % promptTemplates.length
       : 0;
-    const template = SYSTEM_PROMPT_TEMPLATES[nextIndex];
+    const template = promptTemplates[nextIndex];
     setSystemPrompt(template.prompt);
     if (activeId) saveSystemPrompt(template.prompt);
-  }, [activeId, activePromptTemplateIndex, saveSystemPrompt]);
+  }, [activeId, activePromptTemplateIndex, promptTemplates, saveSystemPrompt]);
+
+  const persistCustomPromptTemplates = useCallback((next: PromptTemplate[]) => {
+    setCustomPromptTemplates(next);
+    lsSet("ora:custom-prompt-templates", JSON.stringify(next));
+  }, []);
+
+  const saveCustomPromptTemplate = useCallback(() => {
+    const prompt = systemPrompt.trim();
+    if (!prompt) return;
+    const label = templateNameDraft.trim() || `Custom ${customPromptTemplates.length + 1}`;
+    const id = `${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 70) || "custom"}-${Date.now().toString(36)}`;
+    persistCustomPromptTemplates([...customPromptTemplates, { id, label, prompt }]);
+    setTemplateNameDraft("");
+  }, [customPromptTemplates, persistCustomPromptTemplates, systemPrompt, templateNameDraft]);
+
+  const deleteCustomPromptTemplate = useCallback((id: string) => {
+    persistCustomPromptTemplates(customPromptTemplates.filter((template) => template.id !== id));
+  }, [customPromptTemplates, persistCustomPromptTemplates]);
 
   const persistSoundPacks = useCallback((next: SoundPack[]) => {
     setSoundPacks(next);
@@ -253,24 +276,24 @@ function Workspace() {
     try {
       const query = profileGistId ? `?gistId=${encodeURIComponent(profileGistId)}` : "";
       const response = await fetch(`/api/profile${query}`);
-      const data = await response.json() as { error?: string; gistId?: string | null; profile?: { appearance: AppearanceSettings; soundPacks: SoundPack[] } | null };
+      const data = await response.json() as { error?: string; gistId?: string | null; profile?: { appearance: AppearanceSettings; soundPacks: SoundPack[]; customPromptTemplates?: PromptTemplate[] } | null };
       if (!response.ok || data.error) throw new Error(data.error || "Profile pull failed");
       if (data.gistId) { setProfileGistId(data.gistId); lsSet("ora:profile-gist", data.gistId); }
-      if (data.profile) { setAppearance(data.profile.appearance); persistSoundPacks(data.profile.soundPacks); const selected = data.profile.soundPacks[0]?.id ?? ""; setSelectedSoundPackId(selected); lsSet("ora:selected-sound-pack", selected); }
+      if (data.profile) { setAppearance(data.profile.appearance); persistSoundPacks(data.profile.soundPacks); persistCustomPromptTemplates(data.profile.customPromptTemplates ?? []); const selected = data.profile.soundPacks[0]?.id ?? ""; setSelectedSoundPackId(selected); lsSet("ora:selected-sound-pack", selected); }
       setProfileStatus(data.profile ? "Synced from private Gist" : "No remote profile yet");
     } catch (error) { setProfileStatus(error instanceof Error ? error.message : "Profile pull failed"); }
-  }, [persistSoundPacks, profileGistId]);
+  }, [persistCustomPromptTemplates, persistSoundPacks, profileGistId]);
 
   const pushPersonalProfile = useCallback(async () => {
     setProfileStatus("Pushing private profile…");
     try {
-      const response = await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gistId: profileGistId || undefined, appearance, soundPacks }) });
+      const response = await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gistId: profileGistId || undefined, appearance, soundPacks, customPromptTemplates }) });
       const data = await response.json() as { error?: string; gistId?: string | null };
       if (!response.ok || data.error) throw new Error(data.error || "Profile push failed");
       if (data.gistId) { setProfileGistId(data.gistId); lsSet("ora:profile-gist", data.gistId); }
       setProfileStatus("Synced to private Gist");
     } catch (error) { setProfileStatus(error instanceof Error ? error.message : "Profile push failed"); }
-  }, [appearance, profileGistId, soundPacks]);
+  }, [appearance, customPromptTemplates, profileGistId, soundPacks]);
 
   useEffect(() => { lsSet("ora:selected-sound-pack", selectedSoundPackId); }, [selectedSoundPackId]);
 
@@ -1138,7 +1161,7 @@ function Workspace() {
                 <select
                   value=""
                   onChange={(e) => {
-                    const tpl = SYSTEM_PROMPT_TEMPLATES.find((t) => t.id === e.target.value);
+                    const tpl = promptTemplates.find((t) => t.id === e.target.value);
                     if (tpl) {
                       setSystemPrompt(tpl.prompt);
                       if (activeId) saveSystemPrompt(tpl.prompt);
@@ -1148,9 +1171,14 @@ function Workspace() {
                   aria-label="Insert a system prompt template"
                 >
                   <option value="">Insert template…</option>
-                  {SYSTEM_PROMPT_TEMPLATES.map((t) => (
-                    <option key={t.id} value={t.id}>{t.label}</option>
-                  ))}
+                  <optgroup label="Built-in specialists">
+                    {SYSTEM_PROMPT_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  </optgroup>
+                  {customPromptTemplates.length > 0 && (
+                    <optgroup label="Saved to this device/profile">
+                      {customPromptTemplates.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                    </optgroup>
+                  )}
                 </select>
               </div>
               <textarea
@@ -1162,7 +1190,28 @@ function Workspace() {
                 className="system-prompt-editor input-field w-full px-3 py-2 text-sm placeholder:text-zinc-600 resize-none"
                 aria-describedby="system-prompt-help"
               />
-              <p id="system-prompt-help" className="system-prompt-section__footer">Approximate count · 4 characters ≈ 1 token · Saved to this conversation</p>
+              <div className="system-prompt-save-row">
+                <input
+                  value={templateNameDraft}
+                  onChange={(e) => setTemplateNameDraft(e.target.value)}
+                  className="system-prompt-name-input"
+                  placeholder="Name this prompt…"
+                  aria-label="Name custom system prompt template"
+                  maxLength={80}
+                />
+                <button type="button" className="system-prompt-save-button" onClick={saveCustomPromptTemplate} disabled={!systemPrompt.trim()}>Save template</button>
+              </div>
+              {customPromptTemplates.length > 0 && (
+                <div className="system-prompt-custom-list" aria-label="Saved custom templates">
+                  {customPromptTemplates.map((template) => (
+                    <div key={template.id} className="system-prompt-custom-item">
+                      <span title={template.prompt}>{template.label}</span>
+                      <button type="button" onClick={() => deleteCustomPromptTemplate(template.id)} aria-label={`Delete saved template ${template.label}`}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p id="system-prompt-help" className="system-prompt-section__footer">Approximate count · 4 characters ≈ 1 token · Saved locally and included in profile sync</p>
             </section>
           </div>
         )}

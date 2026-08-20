@@ -1351,3 +1351,16 @@ button:disabled, input:disabled, textarea:disabled, select:disabled { cursor: no
 .system-prompt-token-count { flex: 0 0 auto; align-self: center; padding: 5px 7px; border: 1px solid rgba(72, 230, 209, .22); border-radius: 6px; color: var(--ora-cyan); background: rgba(72, 230, 209, .06); font: 600 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
 .system-prompt-token-count.is-warning { color: #ffc857; border-color: rgba(255, 200, 87, .42); background: rgba(255, 200, 87, .08); }
 @media (max-width: 767px) { .system-prompt-section__header { display: grid; grid-template-columns: 1fr auto; } .system-prompt-section__header > .system-prompt-template { grid-column: 1 / -1; } .prompt-quick-toggle { padding: 0 6px; } }
+
+.system-prompt-save-row { display: flex; align-items: center; gap: 7px; }
+.system-prompt-name-input { min-width: 0; flex: 1; min-height: 31px; padding: 6px 8px; border: 1px solid rgba(139, 157, 190, .2); border-radius: 7px; outline: 0; color: #c7d4e8; background: rgba(6, 9, 16, .62); font-size: 10px; }
+.system-prompt-name-input:focus { border-color: rgba(72, 230, 209, .55); box-shadow: 0 0 0 3px rgba(72, 230, 209, .08); }
+.system-prompt-save-button { min-height: 31px; padding: 6px 9px; border: 1px solid rgba(72, 230, 209, .28); border-radius: 7px; color: var(--ora-cyan); background: rgba(72, 230, 209, .08); font: 600 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.system-prompt-save-button:hover:not(:disabled) { border-color: var(--ora-cyan); background: rgba(72, 230, 209, .15); }
+.system-prompt-save-button:disabled { cursor: not-allowed; opacity: .4; }
+.system-prompt-custom-list { display: grid; gap: 5px; max-height: 90px; overflow-y: auto; }
+.system-prompt-custom-item { display: flex; align-items: center; gap: 6px; min-height: 27px; padding: 4px 7px; border: 1px solid rgba(155, 140, 255, .18); border-radius: 6px; color: #9facc2; background: rgba(155, 140, 255, .05); font-size: 10px; }
+.system-prompt-custom-item span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.system-prompt-custom-item button { color: #6d7b92; font-size: 14px; line-height: 1; }
+.system-prompt-custom-item button:hover { color: #ff8fac; }
+@media (max-width: 767px) { .system-prompt-save-row { align-items: stretch; flex-direction: column; } .system-prompt-save-button { width: 100%; } }
