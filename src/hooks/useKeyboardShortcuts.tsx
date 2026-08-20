@@ -9,6 +9,8 @@ export interface ShortcutHandlers {
   onToggleHistory:() => void;  // ⌘+H
   onToggleGitHub: () => void;  // ⌘+G
   onShowHelp:     () => void;  // ⌘+?
+  onOpenCommandPalette?: () => void; // ⌘+P
+  onToggleBenchmarks?: () => void; // ⌘+B
   onToggleTheme?: () => void;  // ⌘+L
 }
 
@@ -76,6 +78,20 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
           handlers.onShowHelp();
           break;
 
+        case "p":
+        case "P":
+          if (inInput || !handlers.onOpenCommandPalette) break;
+          e.preventDefault();
+          handlers.onOpenCommandPalette();
+          break;
+
+        case "b":
+        case "B":
+          if (inInput || !handlers.onToggleBenchmarks) break;
+          e.preventDefault();
+          handlers.onToggleBenchmarks();
+          break;
+
         case "l":
         case "L":
           if (inInput) break;
@@ -90,7 +106,7 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [handlers.onSend, handlers.onNewChat, handlers.onToggleAgent,
-     handlers.onToggleHistory, handlers.onToggleGitHub, handlers.onShowHelp, handlers.onToggleTheme]
+     handlers.onToggleHistory, handlers.onToggleGitHub, handlers.onShowHelp, handlers.onOpenCommandPalette, handlers.onToggleBenchmarks, handlers.onToggleTheme]
   );
 
   useEffect(() => {
@@ -111,6 +127,8 @@ export const SHORTCUTS = [
   { keys: `${MOD}+H`,     description: "Toggle history panel" },
   { keys: `${MOD}+G`,     description: "Toggle GitHub sidebar" },
   { keys: `${MOD}+L`,     description: "Toggle light / dark theme" },
+  { keys: `${MOD}+P`,     description: "Open Lambert workflow palette" },
+  { keys: `${MOD}+B`,     description: "Open benchmark dashboard" },
   { keys: `${MOD}+?`,     description: "Show / hide this help" },
 ] as const;
 

@@ -13,6 +13,8 @@ import AgentExecutionConsole, { type ExecutionLogEntry } from "@/components/Agen
 import TerminalPanel from "@/components/TerminalPanel";
 import ProjectMemoryPanel from "@/components/ProjectMemoryPanel";
 import CollaborationPanel from "@/components/CollaborationPanel";
+import LambertCommandPalette from "@/components/LambertCommandPalette";
+import BenchmarkDashboard, { type BenchmarkSample } from "@/components/BenchmarkDashboard";
 import AppearancePanel, { PRESETS, readAppearance, type AppearanceSettings, type SoundPack, type SoundMime } from "@/components/AppearancePanel";
 import AuthGate from "@/components/AuthGate";
 import { useConversations } from "@/hooks/useConversations";
@@ -176,6 +178,11 @@ function Workspace() {
   }, []);
 
   const [showHelp, setShowHelp]           = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showBenchmarks, setShowBenchmarks] = useState(false);
+  const [benchmarkSamples, setBenchmarkSamples] = useState<BenchmarkSample[]>(() => {
+    try { return JSON.parse(lsGet("ora:benchmark-samples", "[]")) as BenchmarkSample[]; } catch { return []; }
+  });
   const [localFiles, setLocalFiles]       = useState<InjectedFile[]>([]);
   const [convUsage, setConvUsage]         = useState<TokenUsage | null>(null);
   const [systemPrompt, setSystemPrompt]   = useState("");
@@ -203,7 +210,15 @@ function Workspace() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
   const [kbHeight, setKbHeight] = useState(0);
-  const abortRef  = useRef<AbortController | null>(null);
+  const recordBenchmark = useCallback((sample: Omit<BenchmarkSample, "id" | "startedAt">) => {
+    setBenchmarkSamples((current) => {
+      const next = [...current, { ...sample, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, startedAt: Date.now() }].slice(-32);
+      lsSet("ora:benchmark-samples", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+  const clearBenchmarks = useCallback(() => { setBenchmarkSamples([]); lsSet("ora:benchmark-samples", "[]"); }, []);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Track software keyboard height via visualViewport
   useEffect(() => {
@@ -354,6 +369,8 @@ function Workspace() {
     onToggleHistory: () => setShowHistory((v) => !v),
     onToggleGitHub:  () => setShowGitHub((v) => !v),
     onShowHelp:      () => setShowHelp((v) => !v),
+    onOpenCommandPalette: () => setShowCommandPalette(true),
+    onToggleBenchmarks: () => setShowBenchmarks((v) => !v),
     onToggleTheme:   () => {},
   });
 
@@ -413,6 +430,7 @@ function Workspace() {
   }, [activeId, saveGitHubContext]);
 
   async function sendChat(userText: string, baseMessages?: Message[]) {
+    const benchmarkStartedAt = performance.now();
     const controller = new AbortController();
     abortRef.current?.abort();
     abortRef.current = controller;
@@ -436,6 +454,8 @@ function Workspace() {
     let fullText = "";
     let lastStreamPaint = 0;
     let capturedUsage: TokenUsage | null = null;
+    let benchmarkProvider = selectedProviderId;
+    let benchmarkModel = selectedModel;
 
     try {
       const response = await fetch("/api/chat", {
@@ -457,6 +477,8 @@ function Workspace() {
       if (isAuto) {
         const provider = response.headers.get("X-Routed-Provider") ?? "";
         const model = response.headers.get("X-Routed-Model") ?? "";
+        benchmarkProvider = provider || benchmarkProvider;
+        benchmarkModel = model || benchmarkModel;
         const reason = response.headers.get("X-Route-Reason") ?? "";
         if (provider) {
           setRoutingBadges((badges) => ({
@@ -514,6 +536,7 @@ function Workspace() {
       if (capturedUsage) {
         setConvUsage((previous) => sumUsage([previous, capturedUsage]));
       }
+      recordBenchmark({ kind: "chat", latencyMs: performance.now() - benchmarkStartedAt, provider: benchmarkProvider, model: benchmarkModel, usage: capturedUsage, status: "complete" });
 
       const githubContext: GitHubContext | undefined = activeRepo
         ? { repo: activeRepo, files: injectedFiles, pinnedAt: Date.now() }
@@ -536,6 +559,7 @@ function Workspace() {
         ...current.slice(0, -1),
         { role: "assistant", content, createdAt: now },
       ]);
+      recordBenchmark({ kind: "chat", latencyMs: performance.now() - benchmarkStartedAt, provider: benchmarkProvider, model: benchmarkModel, status: stopped ? "stopped" : "error" });
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       setLoading(false);
@@ -690,6 +714,7 @@ function Workspace() {
       return;
     }
 
+    const benchmarkStartedAt = performance.now();
     const controller = new AbortController();
     abortRef.current?.abort();
     abortRef.current = controller;
@@ -745,6 +770,7 @@ function Workspace() {
       }
       const result = await readAgentStream(response);
       if (!result.plan) throw new Error("The agent did not return a valid plan");
+      recordBenchmark({ kind: "agent", latencyMs: performance.now() - benchmarkStartedAt, provider: selectedProviderId, model: selectedModel, iterations: 1, status: "complete" });
 
       setCurrentPlan(result.plan);
       setAgentPhase("awaiting_approval");
@@ -768,6 +794,7 @@ function Workspace() {
         },
       ]);
       setAgentPhase("idle");
+      recordBenchmark({ kind: "agent", latencyMs: performance.now() - benchmarkStartedAt, provider: selectedProviderId, model: selectedModel, iterations: 1, status: stopped ? "stopped" : "error" });
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       setLoading(false);
@@ -776,6 +803,7 @@ function Workspace() {
   }
 
   async function executePlan(approvedPlan: AgentPlan) {
+    const benchmarkStartedAt = performance.now();
     const controller = new AbortController();
     abortRef.current?.abort();
     abortRef.current = controller;
@@ -837,6 +865,7 @@ function Workspace() {
       }
 
       setAgentPhase("done");
+      recordBenchmark({ kind: "agent", latencyMs: performance.now() - benchmarkStartedAt, provider: selectedProviderId, model: selectedModel, iterations: batchCount, toolCalls: executionLogs.filter((entry) => entry.kind === "tool").length, status: "complete" });
       saveConversation(
         [...newMessages, { role: "assistant", content: finalText, createdAt: Date.now() }],
         selectedProviderId,
@@ -858,6 +887,7 @@ function Workspace() {
         ];
       });
       setAgentPhase("idle");
+      recordBenchmark({ kind: "agent", latencyMs: performance.now() - benchmarkStartedAt, provider: selectedProviderId, model: selectedModel, iterations: batchCount, toolCalls: executionLogs.filter((entry) => entry.kind === "tool").length, status: stopped ? "stopped" : "error" });
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
       setLoading(false);
@@ -1012,6 +1042,8 @@ function Workspace() {
               <span aria-hidden="true">⌁</span>
               <span className="hidden lg:inline">Prompt</span>
             </button>
+            <button type="button" onClick={() => setShowCommandPalette(true)} className={`workspace-tool-toggle touch-target ${showCommandPalette ? "is-active" : ""}`} aria-label="Open Lambert workflow command palette" title="Lambert workflows · Ctrl+P"><span className="workspace-tool-toggle__glyph">⌘</span><span className="hidden xl:inline text-[10px]">OPS</span></button>
+            <button type="button" onClick={() => setShowBenchmarks((v) => !v)} className={`workspace-tool-toggle touch-target ${showBenchmarks ? "is-active" : ""}`} aria-label="Open benchmark dashboard" title="Benchmark dashboard · Ctrl+B"><span className="workspace-tool-toggle__glyph">◌</span></button>
             <button
               type="button"
               onClick={() => setShowAppearance((v) => !v)}
@@ -1603,6 +1635,8 @@ function Workspace() {
         </div>
       </div>
 
+      <LambertCommandPalette open={showCommandPalette} busy={isAgentBusy || loading} onClose={() => setShowCommandPalette(false)} onRun={(prompt) => { setShowCommandPalette(false); setAgentMode(true); void startPlanning(prompt); }} />
+      <BenchmarkDashboard open={showBenchmarks} samples={benchmarkSamples} live={loading || isAgentBusy} onClose={() => setShowBenchmarks(false)} onClear={clearBenchmarks} />
       <ShortcutHelpModal open={showHelp} onClose={() => setShowHelp(false)} />
     </div>
     </ErrorBoundary>
