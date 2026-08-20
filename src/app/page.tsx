@@ -20,6 +20,7 @@ import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShor
 import { buildTokenUsage, sumUsage, formatCost } from "@/lib/tokenCost";
 import { resolveModel, type ProviderId } from "@/lib/providers";
 import { SYSTEM_PROMPT_TEMPLATES } from "@/lib/promptTemplates";
+import { estimatePromptTokens } from "@/lib/promptTokens";
 import type { Message, InjectedFile, PublicProvider, GitHubContext } from "@/types";
 import type { StagedFile } from "@/lib/agentTools";
 import type { AgentPlan } from "@/lib/agent/types";
@@ -212,10 +213,24 @@ function Workspace() {
 
   const {
     conversations, active, activeId, syncing,
+
     newConversation, saveConversation, saveGitHubContext,
     loadConversation, deleteConversation, saveSystemPrompt,
     forceSync,
   } = useConversations();
+
+  const activePromptTemplateIndex = SYSTEM_PROMPT_TEMPLATES.findIndex((template) => template.prompt === systemPrompt);
+  const activePromptTemplate = activePromptTemplateIndex >= 0 ? SYSTEM_PROMPT_TEMPLATES[activePromptTemplateIndex] : null;
+  const promptTokenCount = estimatePromptTokens(systemPrompt);
+
+  const cycleSystemPromptTemplate = useCallback(() => {
+    const nextIndex = activePromptTemplateIndex >= 0
+      ? (activePromptTemplateIndex + 1) % SYSTEM_PROMPT_TEMPLATES.length
+      : 0;
+    const template = SYSTEM_PROMPT_TEMPLATES[nextIndex];
+    setSystemPrompt(template.prompt);
+    if (activeId) saveSystemPrompt(template.prompt);
+  }, [activeId, activePromptTemplateIndex, saveSystemPrompt]);
 
   const persistSoundPacks = useCallback((next: SoundPack[]) => {
     setSoundPacks(next);
@@ -908,6 +923,16 @@ function Workspace() {
             <span className="workspace-theme-lock" title="ORA uses cyberpunk dark mode" aria-label="ORA uses cyberpunk dark mode">◐</span>
             <button
               type="button"
+              onClick={cycleSystemPromptTemplate}
+              className="prompt-quick-toggle touch-target"
+              aria-label={`Switch system prompt template${activePromptTemplate ? `, current: ${activePromptTemplate.label}` : ""}`}
+              title={activePromptTemplate ? `System prompt: ${activePromptTemplate.label}. Click to switch.` : "Cycle system prompt templates"}
+            >
+              <span aria-hidden="true">⌁</span>
+              <span className="hidden lg:inline">Prompt</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setShowAppearance((v) => !v)}
               className={`workspace-tool-toggle touch-target ${showAppearance ? "is-active" : ""}`}
               aria-label="Appearance settings"
@@ -1109,6 +1134,7 @@ function Workspace() {
                   <div id="system-prompt-title" className="system-prompt-section__title">SYSTEM PROMPT</div>
                   <p className="system-prompt-section__hint">Applied before every chat or agent run.</p>
                 </div>
+                <div className={`system-prompt-token-count ${promptTokenCount > 1200 ? "is-warning" : ""}`} aria-live="polite">{promptTokenCount.toLocaleString()} tokens</div>
                 <select
                   value=""
                   onChange={(e) => {
@@ -1136,7 +1162,7 @@ function Workspace() {
                 className="system-prompt-editor input-field w-full px-3 py-2 text-sm placeholder:text-zinc-600 resize-none"
                 aria-describedby="system-prompt-help"
               />
-              <p id="system-prompt-help" className="system-prompt-section__footer">Saved to this conversation · injected as the first instruction</p>
+              <p id="system-prompt-help" className="system-prompt-section__footer">Approximate count · 4 characters ≈ 1 token · Saved to this conversation</p>
             </section>
           </div>
         )}

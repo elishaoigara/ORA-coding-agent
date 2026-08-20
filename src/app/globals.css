@@ -1345,3 +1345,9 @@ button:disabled, input:disabled, textarea:disabled, select:disabled { cursor: no
   .system-prompt-section__header { align-items: stretch; flex-direction: column; gap: 8px; }
   .system-prompt-template { width: 100%; max-width: none; }
 }
+
+.prompt-quick-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 34px; padding: 0 8px; border: 1px solid rgba(155, 140, 255, .28); border-radius: 8px; color: #b9aaff; background: rgba(155, 140, 255, .08); font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .05em; transition: .16s ease; }
+.prompt-quick-toggle:hover, .prompt-quick-toggle:focus-visible { color: #f3efff; border-color: rgba(155, 140, 255, .68); background: rgba(155, 140, 255, .16); box-shadow: 0 0 18px rgba(155, 140, 255, .14); outline: none; }
+.system-prompt-token-count { flex: 0 0 auto; align-self: center; padding: 5px 7px; border: 1px solid rgba(72, 230, 209, .22); border-radius: 6px; color: var(--ora-cyan); background: rgba(72, 230, 209, .06); font: 600 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.system-prompt-token-count.is-warning { color: #ffc857; border-color: rgba(255, 200, 87, .42); background: rgba(255, 200, 87, .08); }
+@media (max-width: 767px) { .system-prompt-section__header { display: grid; grid-template-columns: 1fr auto; } .system-prompt-section__header > .system-prompt-template { grid-column: 1 / -1; } .prompt-quick-toggle { padding: 0 6px; } }
