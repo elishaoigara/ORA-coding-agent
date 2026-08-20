@@ -1389,3 +1389,37 @@ button:disabled, input:disabled, textarea:disabled, select:disabled { cursor: no
 @media (max-width:640px){.ora-command-overlay,.ora-benchmark-overlay{padding:8px}.ora-command-palette__header,.ora-benchmark-panel__header{padding:17px}.ora-benchmark-kpis{grid-template-columns:repeat(2,1fr);padding:12px}.ora-benchmark-chart,.ora-benchmark-table{margin-left:12px;margin-right:12px}.ora-benchmark-row{grid-template-columns:8px 1fr auto}.ora-benchmark-row span:nth-of-type(2),.ora-benchmark-row span:nth-of-type(3){display:none}.ora-command-palette__custom>div{display:grid}.ora-command-palette__custom button{width:100%}}
 
 .ora-command-palette__optimize{display:flex;align-items:center;gap:7px;margin-top:10px;color:#9dacc2;font-size:10px;letter-spacing:normal;text-transform:none}.ora-command-palette__optimize input{accent-color:var(--ora-cyan)}.ora-command-palette__refined{display:block;margin-top:6px;color:#65738a;font-size:10px;line-height:1.4}.ora-benchmark-report-actions{display:flex;flex-wrap:wrap;gap:5px}.ora-benchmark-report-actions button{border:1px solid rgba(72,230,209,.22);border-radius:5px;padding:4px 7px;color:#8edfd3;background:rgba(72,230,209,.04);font:700 9px ui-monospace,SFMono-Regular,Menlo,monospace}.ora-benchmark-report-actions button:hover:not(:disabled){border-color:var(--ora-cyan);background:rgba(72,230,209,.1)}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   MOBILE VIEWPORT CONTAINMENT
+   The mobile shell is a single full-width canvas. Side rails are overlays,
+   never flex columns, and the composer is always constrained to the viewport.
+   ────────────────────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  html, body { width: 100%; min-width: 0; max-width: 100%; overflow: hidden; }
+  body { overscroll-behavior: none; }
+  .ora-shell { width: 100vw !important; max-width: 100vw !important; min-width: 0 !important; height: 100dvh !important; max-height: 100dvh !important; overflow: hidden !important; display: flex !important; position: relative !important; }
+  .ora-workspace, .ora-canvas { width: 100% !important; max-width: 100% !important; min-width: 0 !important; flex: 1 1 auto !important; overflow: hidden !important; }
+  .ora-history-rail, .ora-github-rail, .sidebar-left, .sidebar-right { position: fixed !important; top: 0 !important; bottom: 0 !important; height: 100dvh !important; max-height: 100dvh !important; width: min(88vw, 360px) !important; max-width: min(88vw, 360px) !important; min-width: 0 !important; flex: none !important; }
+  .ora-history-rail:not(.open), .ora-github-rail:not(.open), .sidebar-left:not(.open), .sidebar-right:not(.open) { pointer-events: none !important; }
+  .ora-topbar { width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow: hidden !important; flex-shrink: 0 !important; }
+  .ora-topbar > span { flex: 1 1 auto !important; min-width: 0 !important; max-width: none !important; }
+  .ora-topbar > div:last-child { min-width: 0 !important; max-width: 58vw !important; overflow-x: auto !important; overflow-y: hidden !important; scrollbar-width: none; }
+  .ora-topbar > div:last-child::-webkit-scrollbar { display: none; }
+  .ora-chat-scroll { width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow-x: hidden !important; overflow-y: auto !important; flex: 1 1 auto !important; }
+  .coding-composer { width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow: hidden !important; flex-shrink: 0 !important; }
+  .coding-composer > div, .coding-composer__row { width: 100% !important; max-width: 100% !important; min-width: 0 !important; }
+  .coding-composer__row { overflow: hidden !important; }
+  .coding-composer__input { min-width: 0 !important; width: 100% !important; }
+  .ora-empty-state { width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow: hidden !important; }
+  .ora-chat-scroll > * { max-width: 100% !important; min-width: 0 !important; }
+}
+
+@media (max-width: 420px) {
+  .ora-topbar > div:last-child { max-width: 52vw !important; }
+  .ora-topbar .workspace-tool-toggle { width: 32px !important; height: 32px !important; }
+  .ora-topbar .prompt-quick-toggle { max-width: 34px; overflow: hidden; }
+  .ora-topbar .prompt-quick-toggle > span:last-child { display: none; }
+  .ora-topbar .ora-model-trigger { max-width: 82px; }
+  .ora-topbar .ora-model-trigger > span:nth-child(3) { display: none; }
+}
