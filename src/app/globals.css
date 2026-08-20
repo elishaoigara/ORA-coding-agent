@@ -10,26 +10,26 @@
   --color-bg: 9 9 11;
   --color-surface: 24 24 27;
 
-  /* ── Theme tokens (dark = default) ──────────────────────────────────── */
+  /* ORA uses a single dark cyberpunk palette. */
   --app-bg: #09090b;
   --app-text: #e4e4e7;
-  --panel-bg: #18181b;
-  --panel-border: #27272a;
-  --scrollbar-thumb: #3f3f46;
-  --scrollbar-thumb-hover: #52525b;
+  --panel-bg: #101421;
+  --panel-border: #242b3d;
+  --scrollbar-thumb: #364159;
+  --scrollbar-thumb-hover: #4b5a7a;
+  color-scheme: dark;
 }
 
-/* Cream/grey light theme — toggled by adding class="light" to <html>.
-   Only the base surface tokens change here; most component colour is
-   handled additively via the `light:` Tailwind variant on individual
-   elements (see tailwind.config.ts). */
-.light {
-  --app-bg: #f8f5f0;
-  --app-text: #2b2620;
-  --panel-bg: #ffffff;
-  --panel-border: #e5ded1;
-  --scrollbar-thumb: #d8d0c0;
-  --scrollbar-thumb-hover: #c7bda8;
+/* Legacy .light markup is intentionally neutralized so stale browser state
+   can never turn the command center into a cream/white application. */
+html.light {
+  --app-bg: #09090b;
+  --app-text: #e4e4e7;
+  --panel-bg: #101421;
+  --panel-border: #242b3d;
+  --scrollbar-thumb: #364159;
+  --scrollbar-thumb-hover: #4b5a7a;
+  color-scheme: dark;
 }
 
 * {
@@ -91,8 +91,8 @@ input, textarea, select {
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
-.light .mobile-overlay {
-  background: rgba(43, 38, 32, 0.25);
+html.light .mobile-overlay {
+  background: rgba(0, 0, 0, 0.7);
 }
 
 /* Bottom sheet */
@@ -1321,3 +1321,8 @@ button:disabled, input:disabled, textarea:disabled, select:disabled { cursor: no
 .appearance-profile-sync__row button { min-width: 48px; min-height: 30px; padding: 5px 8px; border: 1px solid rgba(139, 157, 190, .18); border-radius: 7px; color: #8b9ab0; background: rgba(5, 9, 17, .48); font-size: 10px; }
 .appearance-profile-sync__row button:hover { color: var(--ora-cyan); border-color: var(--ora-line); }
 @media (max-width: 767px) { .appearance-profile-sync__row { flex-wrap: wrap; } .appearance-profile-sync__row .appearance-panel__hint { flex-basis: 100%; } }
+
+.workspace-theme-lock { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; color: var(--ora-cyan); opacity: .78; font-size: 15px; filter: drop-shadow(0 0 7px rgba(72, 230, 209, .35)); }
+.appearance-theme-lock { position: relative; display: grid; gap: 5px; border: 1px solid rgba(72, 230, 209, .2); border-radius: 10px; padding: 11px 12px; background: linear-gradient(135deg, rgba(72, 230, 209, .08), rgba(155, 140, 255, .06)); }
+.appearance-theme-lock strong { color: #e7f8f7; font-size: 12px; font-weight: 650; }
+.appearance-theme-lock__status { position: absolute; top: 11px; right: 12px; color: var(--ora-cyan); font: 600 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; }

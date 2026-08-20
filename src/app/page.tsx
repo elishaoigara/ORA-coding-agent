@@ -19,7 +19,6 @@ import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
 import { buildTokenUsage, sumUsage, formatCost } from "@/lib/tokenCost";
 import { resolveModel, type ProviderId } from "@/lib/providers";
-import { useTheme, ThemeToggleButton } from "@/lib/theme";
 import { SYSTEM_PROMPT_TEMPLATES } from "@/lib/promptTemplates";
 import type { Message, InjectedFile, PublicProvider, GitHubContext } from "@/types";
 import type { StagedFile } from "@/lib/agentTools";
@@ -218,8 +217,6 @@ function Workspace() {
     forceSync,
   } = useConversations();
 
-  const { toggleTheme } = useTheme();
-
   const persistSoundPacks = useCallback((next: SoundPack[]) => {
     setSoundPacks(next);
     lsSet("ora:sound-packs", JSON.stringify(next));
@@ -269,7 +266,7 @@ function Workspace() {
     onToggleHistory: () => setShowHistory((v) => !v),
     onToggleGitHub:  () => setShowGitHub((v) => !v),
     onShowHelp:      () => setShowHelp((v) => !v),
-    onToggleTheme:   toggleTheme,
+    onToggleTheme:   () => {},
   });
 
   useEffect(() => {
@@ -906,9 +903,9 @@ function Workspace() {
             <span className="text-violet-400 text-xs flex-shrink-0 animate-pulse">↕</span>
           )}
 
-          {/* Right: theme + model pill + mode + github + new */}
+          {/* Right: cyberpunk status + model pill + mode + github + new */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            <ThemeToggleButton />
+            <span className="workspace-theme-lock" title="ORA uses cyberpunk dark mode" aria-label="ORA uses cyberpunk dark mode">◐</span>
             <button
               type="button"
               onClick={() => setShowAppearance((v) => !v)}

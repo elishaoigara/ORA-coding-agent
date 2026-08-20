@@ -14,19 +14,15 @@ export const viewport: Viewport = {
   userScalable: false,
 };
 
-// Runs before hydration/paint so the correct theme class is on <html> from
-// the very first frame — avoids a flash of the wrong theme on load. Kept as
-// a tiny inline script (not a hook) specifically because hooks only run
-// after React has already committed the first render.
+// ORA is intentionally cyberpunk-dark only. Remove legacy light classes and
+// persist the locked palette before the first paint to avoid a white flash.
 const NO_FLASH_THEME_SCRIPT = `
 (function () {
   try {
-    var stored = localStorage.getItem('codeagent:theme');
-    var theme = stored === 'light' || stored === 'dark'
-      ? stored
-      : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
-    if (theme === 'light') document.documentElement.classList.add('light');
-  } catch (e) { /* localStorage unavailable — default dark */ }
+    document.documentElement.classList.remove('light');
+    document.documentElement.style.colorScheme = 'dark';
+    localStorage.setItem('codeagent:theme', 'dark');
+  } catch (e) { /* localStorage unavailable — CSS still defaults dark */ }
 })();
 `;
 

@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useTheme, type Theme } from "@/lib/theme";
-
 export type AccentId = "cyan" | "magenta" | "lime" | "amber" | "blue" | "red";
 export type Density = "comfortable" | "compact";
 export type PresetId = "neon-grid" | "synthwave" | "toxic-lab" | "solar-flare" | "deep-space" | "blood-moon";
@@ -62,7 +60,6 @@ interface AppearancePanelProps {
 }
 
 export default function AppearancePanel({ settings, onChange, onClose, soundPacks = [], selectedSoundPackId = "", onSelectSoundPack, onUploadSoundPack, onDeleteSoundPack, profileStatus = "Local profile", onPullProfile, onPushProfile }: AppearancePanelProps) {
-  const { theme, setTheme } = useTheme();
   const [draft, setDraft] = useState(settings);
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => { setDraft(settings); }, [settings]);
@@ -83,7 +80,7 @@ export default function AppearancePanel({ settings, onChange, onClose, soundPack
       </header>
       <div className="appearance-panel__body">
         <fieldset className="appearance-panel__section appearance-panel__presets"><legend className="appearance-panel__label">Cyberpunk presets</legend><div className="appearance-presets">{PRESETS.map((preset) => <button key={preset.id} type="button" className={`appearance-preset ${draft.preset === preset.id ? "is-active" : ""}`} onClick={() => selectPreset(preset)} aria-pressed={draft.preset === preset.id}><span className="appearance-preset__signal" style={{ background: `linear-gradient(135deg, ${preset.cyan}, ${preset.violet})` }} /><span><strong>{preset.label}</strong><small>{preset.description}</small></span></button>)}</div></fieldset>
-        <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Theme mode</legend><div className="appearance-segmented" role="group" aria-label="Theme mode">{(["dark", "light"] as Theme[]).map((value) => <button key={value} type="button" className={theme === value ? "is-active" : ""} onClick={() => setTheme(value)} aria-pressed={theme === value}>{value === "dark" ? "Night grid" : "Day grid"}</button>)}</div></fieldset>
+        <div className="appearance-panel__section appearance-theme-lock" role="status"><div><div className="appearance-panel__label">Theme mode</div><strong>Cyberpunk night grid</strong></div><span className="appearance-theme-lock__status">LOCKED</span><p className="appearance-panel__hint">ORA stays dark by design so neon accents, telemetry, and code surfaces remain readable.</p></div>
         <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Sound effects</legend><button type="button" className={`appearance-sound-toggle ${draft.soundEnabled ? "is-active" : ""}`} onClick={() => update({ ...draft, soundEnabled: !draft.soundEnabled }, false)} aria-pressed={draft.soundEnabled}><span aria-hidden="true">{draft.soundEnabled ? "◉" : "○"}</span><span>{draft.soundEnabled ? "Signal sounds on" : "Signal sounds off"}</span></button><p className="appearance-panel__hint">Optional UI chirps. Sound stays local unless you sync a selected pack.</p></fieldset>
         <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Sound pack</legend><div className="appearance-sound-packs">{soundPacks.length === 0 && <span className="appearance-panel__hint">No custom pack uploaded.</span>}{soundPacks.map((pack) => <div key={pack.id} className={`appearance-sound-pack ${selectedSoundPackId === pack.id ? "is-active" : ""}`}><button type="button" onClick={() => { onSelectSoundPack?.(pack.id); preview(pack); }} aria-pressed={selectedSoundPackId === pack.id}><span>◖</span><strong>{pack.name}</strong></button><button type="button" className="appearance-sound-pack__delete" onClick={() => onDeleteSoundPack?.(pack.id)} aria-label={`Delete sound pack ${pack.name}`}>×</button></div>)}<input ref={fileRef} type="file" accept="audio/wav,audio/mpeg,audio/ogg,audio/webm" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUploadSoundPack?.(file); event.currentTarget.value = ""; }} /><button type="button" className="appearance-upload" onClick={() => fileRef.current?.click()} disabled={soundPacks.length >= 3}>+ Upload sound pack <span>(max 3, 256KB each)</span></button></div></fieldset>
         <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Workspace density</legend><div className="appearance-segmented" role="group" aria-label="Workspace density">{(["comfortable", "compact"] as Density[]).map((value) => <button key={value} type="button" className={draft.density === value ? "is-active" : ""} onClick={() => update({ ...draft, density: value })} aria-pressed={draft.density === value}>{value}</button>)}</div></fieldset>
