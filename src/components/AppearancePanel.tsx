@@ -7,7 +7,8 @@ export type PresetId = "neon-grid" | "synthwave" | "toxic-lab" | "solar-flare" |
 export type SoundMime = "audio/wav" | "audio/mpeg" | "audio/ogg" | "audio/webm";
 
 export interface SoundPack { id: string; name: string; mime: SoundMime; dataUrl: string; }
-export interface AppearanceSettings { accent: AccentId; density: Density; preset: PresetId; soundEnabled: boolean; }
+export type ThemeMode = "dark" | "light";
+export interface AppearanceSettings { accent: AccentId; density: Density; preset: PresetId; soundEnabled: boolean; theme: ThemeMode; customAccent: string; }
 export interface AppearancePreset { id: PresetId; label: string; description: string; accent: AccentId; density: Density; cyan: string; violet: string; line: string; }
 
 export const PRESETS: AppearancePreset[] = [
@@ -20,7 +21,7 @@ export const PRESETS: AppearancePreset[] = [
 ];
 
 export const ACCENTS = PRESETS.map(({ label, accent: id, cyan, violet, line }) => ({ id, label, cyan, violet, line }));
-const DEFAULTS: AppearanceSettings = { accent: "cyan", density: "comfortable", preset: "neon-grid", soundEnabled: false };
+const DEFAULTS: AppearanceSettings = { accent: "cyan", density: "comfortable", preset: "neon-grid", soundEnabled: false, theme: "dark", customAccent: "" };
 
 export function readAppearance(): AppearanceSettings {
   if (typeof window === "undefined") return DEFAULTS;
@@ -28,7 +29,7 @@ export function readAppearance(): AppearanceSettings {
     const parsed = JSON.parse(localStorage.getItem("ora:appearance") || "null") as Partial<AppearanceSettings> | null;
     const preset = PRESETS.some((item) => item.id === parsed?.preset) ? parsed!.preset! : DEFAULTS.preset;
     const fromPreset = PRESETS.find((item) => item.id === preset) ?? PRESETS[0];
-    return { ...DEFAULTS, ...parsed, preset, accent: PRESETS.some((item) => item.accent === parsed?.accent) ? parsed!.accent! : fromPreset.accent, density: parsed?.density === "compact" ? "compact" : fromPreset.density, soundEnabled: parsed?.soundEnabled === true };
+    return { ...DEFAULTS, ...parsed, preset, accent: PRESETS.some((item) => item.accent === parsed?.accent) ? parsed!.accent! : fromPreset.accent, density: parsed?.density === "compact" ? "compact" : fromPreset.density, soundEnabled: parsed?.soundEnabled === true, theme: parsed?.theme === "light" ? "light" : "dark", customAccent: typeof parsed?.customAccent === "string" && /^#[0-9a-f]{6}$/i.test(parsed.customAccent) ? parsed.customAccent : "" };
   } catch { return DEFAULTS; }
 }
 
@@ -82,7 +83,8 @@ export default function AppearancePanel({ settings, onChange, onClose, soundPack
       </header>
       <div className="appearance-panel__body">
         <fieldset className="appearance-panel__section appearance-panel__presets"><legend className="appearance-panel__label">Cyberpunk presets</legend><div className="appearance-presets">{PRESETS.map((preset) => <button key={preset.id} type="button" className={`appearance-preset ${draft.preset === preset.id ? "is-active" : ""}`} onClick={() => selectPreset(preset)} aria-pressed={draft.preset === preset.id}><span className="appearance-preset__signal" style={{ background: `linear-gradient(135deg, ${preset.cyan}, ${preset.violet})` }} /><span><strong>{preset.label}</strong><small>{preset.description}</small></span></button>)}</div></fieldset>
-        <div className="appearance-panel__section appearance-theme-lock" role="status"><div><div className="appearance-panel__label">Theme mode</div><strong>Cyberpunk night grid</strong></div><span className="appearance-theme-lock__status">LOCKED</span><p className="appearance-panel__hint">ORA stays dark by design so neon accents, telemetry, and code surfaces remain readable.</p></div>
+        <fieldset className="appearance-panel__section appearance-theme-mode"><legend className="appearance-panel__label">Theme mode</legend><div className="appearance-segmented" role="group" aria-label="Theme mode">{(["dark", "light"] as const).map((value) => <button key={value} type="button" className={draft.theme === value ? "is-active" : ""} onClick={() => update({ ...draft, theme: value })} aria-pressed={draft.theme === value}>{value === "dark" ? "Night grid" : "Day grid"}</button>)}</div><p className="appearance-panel__hint">Both modes preserve ORA’s neon signal palette and are saved across sessions.</p></fieldset>
+        <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Lambert accent color</legend><label className="appearance-color-picker"><span>Custom signal</span><input type="color" value={draft.customAccent || (ACCENTS.find((item) => item.id === draft.accent)?.cyan ?? "#48e6d1")} onChange={(event) => update({ ...draft, customAccent: event.target.value, preset: "neon-grid" })} aria-label="Custom Lambert accent color" /></label><p className="appearance-panel__hint">Choose a six-digit accent. Presets remain available above.</p></fieldset>
         <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Sound effects</legend><button type="button" className={`appearance-sound-toggle ${draft.soundEnabled ? "is-active" : ""}`} onClick={() => update({ ...draft, soundEnabled: !draft.soundEnabled }, false)} aria-pressed={draft.soundEnabled}><span aria-hidden="true">{draft.soundEnabled ? "◉" : "○"}</span><span>{draft.soundEnabled ? "Signal sounds on" : "Signal sounds off"}</span></button><p className="appearance-panel__hint">Optional UI chirps. Sound stays local unless you sync a selected pack.</p></fieldset>
         <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Sound pack</legend><div className="appearance-sound-packs">{soundPacks.length === 0 && <span className="appearance-panel__hint">No custom pack uploaded.</span>}{soundPacks.map((pack) => <div key={pack.id} className={`appearance-sound-pack ${selectedSoundPackId === pack.id ? "is-active" : ""}`}><button type="button" onClick={() => { onSelectSoundPack?.(pack.id); preview(pack); }} aria-pressed={selectedSoundPackId === pack.id}><span>◖</span><strong>{pack.name}</strong></button><button type="button" className="appearance-sound-pack__delete" onClick={() => onDeleteSoundPack?.(pack.id)} aria-label={`Delete sound pack ${pack.name}`}>×</button></div>)}<input ref={fileRef} type="file" accept="audio/wav,audio/mpeg,audio/ogg,audio/webm" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUploadSoundPack?.(file); event.currentTarget.value = ""; }} /><button type="button" className="appearance-upload" onClick={() => fileRef.current?.click()} disabled={soundPacks.length >= 3}>+ Upload sound pack <span>(max 3, 256KB each)</span></button></div></fieldset>
         <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Workspace density</legend><div className="appearance-segmented" role="group" aria-label="Workspace density">{(["comfortable", "compact"] as Density[]).map((value) => <button key={value} type="button" className={draft.density === value ? "is-active" : ""} onClick={() => update({ ...draft, density: value })} aria-pressed={draft.density === value}>{value}</button>)}</div></fieldset>

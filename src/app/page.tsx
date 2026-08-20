@@ -20,6 +20,7 @@ import AuthGate from "@/components/AuthGate";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
 import { useMobileDrawerGestures } from "@/hooks/useMobileDrawerGestures";
+import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 import { useDialogFocus } from "@/hooks/useDialogFocus";
 import { buildTokenUsage, sumUsage, formatCost } from "@/lib/tokenCost";
 import { resolveModel, type ProviderId } from "@/lib/providers";
@@ -151,6 +152,8 @@ function Workspace() {
   const [messages, setMessages]           = useState<Message[]>([]);
   const [routingBadges, setRoutingBadges] = useState<Record<number, RoutingBadge>>({});
   const [input, setInput]                 = useState("");
+  const handleVoiceTranscript = useCallback((text: string) => setInput((current) => current.trim() ? `${current.trim()} ${text.trim()}` : text.trim()), []);
+  const { isSupported: speechSupported, isListening: speechListening, error: speechError, toggle: toggleSpeech } = useSpeechRecognition({ onTranscript: handleVoiceTranscript });
   const [loading, setLoading]             = useState(false);
   const [injectedFiles, setInjectedFiles] = useState<InjectedFile[]>([]);
   const [activeRepo, setActiveRepo]       = useState("");
@@ -402,7 +405,7 @@ function Workspace() {
     onShowHelp:      () => setShowHelp((v) => !v),
     onOpenCommandPalette: () => setShowCommandPalette(true),
     onToggleBenchmarks: () => setShowBenchmarks((v) => !v),
-    onToggleTheme:   () => {},
+    onToggleTheme:   () => setAppearance((current) => ({ ...current, theme: current.theme === "dark" ? "light" : "dark" })),
   });
 
   useEffect(() => {
@@ -971,12 +974,15 @@ function Workspace() {
   }, [activeRepo]);
   useEffect(() => {
     const preset = PRESETS.find((item) => item.id === appearance.preset) ?? PRESETS[0];
-    document.documentElement.style.setProperty("--ora-cyan", preset.cyan);
+    document.documentElement.classList.toggle("light", appearance.theme === "light");
+    document.documentElement.dataset.oraTheme = appearance.theme;
+    document.documentElement.style.colorScheme = appearance.theme;
+    document.documentElement.style.setProperty("--ora-cyan", appearance.customAccent || preset.cyan);
     document.documentElement.style.setProperty("--ora-violet", preset.violet);
     document.documentElement.style.setProperty("--ora-line", preset.line);
     document.documentElement.dataset.oraAccent = appearance.accent;
     document.documentElement.dataset.oraDensity = appearance.density;
-    try { localStorage.setItem("ora:appearance", JSON.stringify(appearance)); } catch { /* optional persistence */ }
+    try { localStorage.setItem("ora:appearance", JSON.stringify(appearance)); localStorage.setItem("ora:theme", appearance.theme); } catch { /* optional persistence */ }
   }, [appearance]);
 
   // Bug fix #2: explicit isAgentBusy check
@@ -1594,6 +1600,12 @@ function Workspace() {
                   style={{ fontSize: "16px", textAlign: "left" }}
                 />
               </div>
+
+              {speechSupported && !loading && !isAgentBusy && (
+                <button type="button" onClick={toggleSpeech} disabled={inputDisabled} className={`flex items-center justify-center rounded-xl w-[46px] h-[46px] flex-shrink-0 transition-all ${speechListening ? "bg-red-700 text-white animate-pulse" : "bg-zinc-800 hover:bg-zinc-700 text-zinc-300 light:bg-[#efe9dd] light:text-[#5f5649]"}`} aria-label={speechListening ? "Stop voice dictation" : "Start voice dictation"} title={speechError ?? (speechListening ? "Stop voice dictation" : "Dictate a message")}>
+                  <span aria-hidden="true">{speechListening ? "■" : "⌕"}</span>
+                </button>
+              )}
 
               {/* Send / stop button */}
               {loading || isAgentBusy ? (

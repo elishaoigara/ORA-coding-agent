@@ -1,0 +1,29 @@
+ORA production asset audit
+
+16K	.next/static/xWVdnJRwejpNfhyJeXUWt
+1.6M	.next/static/chunks
+1.7M	.next/static
+
+Largest static files:
+905.0 KB  .next/static/chunks/0kl3dzsq-qkuh.js
+223.7 KB  .next/static/chunks/1dx9d_ic1g1cw.js
+177.4 KB  .next/static/chunks/0cyqws0k0_lx5.js
+110.0 KB  .next/static/chunks/0cz1d0mv5g_q7.js
+106.0 KB  .next/static/chunks/2vjm7afuq7peb.css
+24.9 KB  .next/static/chunks/1tca1-229nmdc.js
+16.4 KB  .next/static/chunks/28-hjhkq11umd.js
+15.6 KB  .next/static/chunks/0tzb5brxzd1pk.js
+14.0 KB  .next/static/chunks/0ehjiuuxbbhq9.js
+9.4 KB  .next/static/chunks/turbopack-2yizb4lu-jr3h.js
+0.2 KB  .next/static/xWVdnJRwejpNfhyJeXUWt/_buildManifest.js
+0.2 KB  .next/static/chunks/0zu-nzjb7gsz6.js
+0.1 KB  .next/static/xWVdnJRwejpNfhyJeXUWt/_clientMiddlewareManifest.js
+0.1 KB  .next/static/xWVdnJRwejpNfhyJeXUWt/_ssgManifest.js
+
+Build manifest sizes:
+24K	.next/server/app/page
+4.0K	.next/server/app/page.js
+4.0K	.next/server/app/page.js.map
+12K	.next/server/app/page.js.nft.json
+8.0K	.next/server/app/page_client-reference-manifest.js
+4.0K	.next/server/app-paths-manifest.json
