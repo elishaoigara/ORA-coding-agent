@@ -1102,10 +1102,13 @@ function Workspace() {
               ))}
             </div>
 
-            {/* System prompt section */}
-            <div className="px-4 pb-4 pt-2 border-t border-zinc-800 light:border-[#e5ded1]">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-zinc-500 light:text-[#8a7f6d] text-xs font-medium">System prompt</label>
+            {/* System prompt is intentionally a separate configuration section. */}
+            <section className="system-prompt-section" aria-labelledby="system-prompt-title">
+              <div className="system-prompt-section__header">
+                <div>
+                  <div id="system-prompt-title" className="system-prompt-section__title">SYSTEM PROMPT</div>
+                  <p className="system-prompt-section__hint">Applied before every chat or agent run.</p>
+                </div>
                 <select
                   value=""
                   onChange={(e) => {
@@ -1115,10 +1118,10 @@ function Workspace() {
                       if (activeId) saveSystemPrompt(tpl.prompt);
                     }
                   }}
-                  className="bg-zinc-800 light:bg-[#efe9dd] border border-zinc-700 light:border-[#ddd3bd] rounded text-[11px] text-zinc-400 light:text-[#6b6255] px-1.5 py-1 focus:outline-none max-w-[140px]"
+                  className="system-prompt-template"
                   aria-label="Insert a system prompt template"
                 >
-                  <option value="">Templates…</option>
+                  <option value="">Insert template…</option>
                   {SYSTEM_PROMPT_TEMPLATES.map((t) => (
                     <option key={t.id} value={t.id}>{t.label}</option>
                   ))}
@@ -1128,11 +1131,13 @@ function Workspace() {
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
                 onBlur={() => { if (activeId) saveSystemPrompt(systemPrompt); }}
-                rows={2}
-                placeholder="Custom instructions..."
-                className="input-field w-full px-3 py-2 text-sm placeholder:text-zinc-600 resize-none"
+                rows={4}
+                placeholder="Define ORA’s role, coding standards, constraints, and preferred response style…"
+                className="system-prompt-editor input-field w-full px-3 py-2 text-sm placeholder:text-zinc-600 resize-none"
+                aria-describedby="system-prompt-help"
               />
-            </div>
+              <p id="system-prompt-help" className="system-prompt-section__footer">Saved to this conversation · injected as the first instruction</p>
+            </section>
           </div>
         )}
 
