@@ -20,6 +20,7 @@ import AuthGate from "@/components/AuthGate";
 import { useConversations } from "@/hooks/useConversations";
 import { useKeyboardShortcuts, ShortcutHelpModal } from "@/hooks/useKeyboardShortcuts";
 import { useMobileDrawerGestures } from "@/hooks/useMobileDrawerGestures";
+import { useDialogFocus } from "@/hooks/useDialogFocus";
 import { buildTokenUsage, sumUsage, formatCost } from "@/lib/tokenCost";
 import { resolveModel, type ProviderId } from "@/lib/providers";
 import { SYSTEM_PROMPT_TEMPLATES, type PromptTemplate } from "@/lib/promptTemplates";
@@ -382,6 +383,8 @@ function Workspace() {
   useEffect(() => { lsSet("ora:selected-sound-pack", selectedSoundPackId); }, [selectedSoundPackId]);
   useEffect(() => { lsSet("ora:display-name", personalDisplayName.trim() || "Lambert"); }, [personalDisplayName]);
 
+  const { setNode: setHistoryNode, onKeyDown: onHistoryKeyDown } = useDialogFocus<HTMLElement>(showHistory, () => setShowHistory(false));
+  const { setNode: setGitHubNode, onKeyDown: onGitHubKeyDown } = useDialogFocus<HTMLElement>(showGitHub, () => setShowGitHub(false));
   useMobileDrawerGestures({
     onOpenHistory: () => { setShowGitHub(false); setShowHistory(true); },
     onOpenGitHub: () => { setShowHistory(false); setShowGitHub(true); },
@@ -1008,7 +1011,7 @@ function Workspace() {
       )}
 
       {/* ── History sidebar ───────────────────────────────────────────────── */}
-      <div className={`sidebar-left ora-rail ora-history-rail ${showHistory ? "open" : ""} md:static md:transform-none md:visible md:w-64 md:flex md:flex-col md:border-r md:border-zinc-800 light:md:border-[#e5ded1] md:bg-transparent`}>
+      <div ref={setHistoryNode} tabIndex={-1} onKeyDown={onHistoryKeyDown} className={`sidebar-left ora-rail ora-history-rail ${showHistory ? "open" : ""} md:static md:transform-none md:visible md:w-64 md:flex md:flex-col md:border-r md:border-zinc-800 light:md:border-[#e5ded1] md:bg-transparent`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1] flex-shrink-0">
           <span className="text-zinc-100 light:text-[#2b2620] text-sm font-semibold tracking-tight">History</span>
           <div className="flex items-center gap-1">
@@ -1633,7 +1636,7 @@ function Workspace() {
       )}
 
       {/* ── GitHub sidebar ────────────────────────────────────────────────── */}
-      <div className={`sidebar-right ora-rail ora-github-rail ${showGitHub ? "open" : ""} md:static md:transform-none md:visible md:flex md:flex-col md:border-l md:border-zinc-800 light:md:border-[#e5ded1] md:bg-transparent`}>
+      <div ref={setGitHubNode} tabIndex={-1} onKeyDown={onGitHubKeyDown} className={`sidebar-right ora-rail ora-github-rail ${showGitHub ? "open" : ""} md:static md:transform-none md:visible md:flex md:flex-col md:border-l md:border-zinc-800 light:md:border-[#e5ded1] md:bg-transparent`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 light:border-[#e5ded1] flex-shrink-0">
           <span className="text-zinc-100 light:text-[#2b2620] text-sm font-semibold">GitHub</span>
           <button onClick={() => setShowGitHub(false)} className="touch-target text-zinc-500 hover:text-zinc-200 light:text-[#8a7f6d] light:hover:text-[#2b2620]">

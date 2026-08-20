@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { optimizeWorkflowBrief } from "@/lib/workflowOptimizer";
+import { useDialogFocus } from "@/hooks/useDialogFocus";
 
 export interface LambertWorkflow {
   id: string;
@@ -30,6 +31,7 @@ export default function LambertCommandPalette({ open, busy, onClose, onRun }: Pr
   const [query, setQuery] = useState("");
   const [customTask, setCustomTask] = useState("");
   const [autoOptimize, setAutoOptimize] = useState(true);
+  const { setNode: setDialogNode, onKeyDown: onDialogKeyDown } = useDialogFocus<HTMLElement>(open, onClose);
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return normalized ? LAMBERT_WORKFLOWS.filter((item) => `${item.label} ${item.description}`.toLowerCase().includes(normalized)) : LAMBERT_WORKFLOWS;
@@ -50,7 +52,7 @@ export default function LambertCommandPalette({ open, busy, onClose, onRun }: Pr
 
   return (
     <div className="ora-command-overlay" role="presentation" onMouseDown={onClose}>
-      <section className="ora-command-palette" role="dialog" aria-modal="true" aria-labelledby="lambert-command-title" onMouseDown={(event) => event.stopPropagation()}>
+      <section ref={setDialogNode} tabIndex={-1} onKeyDown={onDialogKeyDown} className="ora-command-palette" role="dialog" aria-modal="true" aria-labelledby="lambert-command-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="ora-command-palette__header">
           <div>
             <div className="ora-command-palette__eyebrow">LAMBERT // AUTONOMOUS OPS</div>

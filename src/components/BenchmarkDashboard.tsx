@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { formatCost, formatTokens, type TokenUsage } from "@/lib/tokenCost";
+import { useDialogFocus } from "@/hooks/useDialogFocus";
 
 export interface BenchmarkSample {
   id: string;
@@ -32,6 +33,7 @@ function formatLatency(value: number) {
 }
 
 export default function BenchmarkDashboard({ open, samples, live, onClose, onClear, onExportJson, onExportCsv, onShare }: Props) {
+  const { setNode: setDialogNode, onKeyDown: onDialogKeyDown } = useDialogFocus<HTMLElement>(open, onClose);
   const summary = useMemo(() => {
     const completed = samples.filter((sample) => sample.status === "complete");
     const usage = completed.reduce((total, sample) => total + (sample.usage?.totalTokens ?? 0), 0);
@@ -45,7 +47,7 @@ export default function BenchmarkDashboard({ open, samples, live, onClose, onCle
 
   return (
     <div className="ora-benchmark-overlay" role="presentation" onMouseDown={onClose}>
-      <section className="ora-benchmark-panel" role="dialog" aria-modal="true" aria-labelledby="benchmark-title" onMouseDown={(event) => event.stopPropagation()}>
+      <section ref={setDialogNode} tabIndex={-1} onKeyDown={onDialogKeyDown} className="ora-benchmark-panel" role="dialog" aria-modal="true" aria-labelledby="benchmark-title" onMouseDown={(event) => event.stopPropagation()}>
         <header className="ora-benchmark-panel__header"><div><div className="ora-benchmark-panel__eyebrow">ORA // PERFORMANCE TELEMETRY</div><h2 id="benchmark-title">Benchmark dashboard</h2><p>Live response and resource signals for Lambert’s workspace.</p></div><div className="ora-benchmark-panel__actions"><span className={`ora-benchmark-live ${live ? "is-live" : ""}`}><i />{live ? "LIVE" : "IDLE"}</span><button type="button" className="touch-target" onClick={onClose} aria-label="Close benchmark dashboard">×</button></div></header>
         <div className="ora-benchmark-kpis"><article><span>Runs</span><strong>{summary.runs}</strong><small>recorded samples</small></article><article><span>Average latency</span><strong>{summary.averageLatency ? formatLatency(summary.averageLatency) : "—"}</strong><small>request to completion</small></article><article><span>Tokens</span><strong>{formatTokens(summary.usage)}</strong><small>recorded output + input</small></article><article><span>Est. cost</span><strong>{formatCost(summary.cost)}</strong><small>from provider usage</small></article></div>
         <div className="ora-benchmark-chart" aria-label="Latency history"><div className="ora-benchmark-chart__header"><span>Latency history</span><small>fastest {summary.fastest ? formatLatency(summary.fastest) : "—"}</small></div><div className="ora-benchmark-bars">{samples.slice(-16).map((sample) => { const max = Math.max(...samples.slice(-16).map((item) => item.latencyMs), 1); return <div key={sample.id} className="ora-benchmark-bar" title={`${sample.kind} · ${formatLatency(sample.latencyMs)}`}><span style={{ height: `${Math.max(8, (sample.latencyMs / max) * 100)}%` }} /><small>{Math.round(sample.latencyMs / 100) / 10}s</small></div>; })}{samples.length === 0 && <p>No benchmark runs yet. Send a chat or launch an autonomous workflow to start collecting telemetry.</p>}</div></div>
