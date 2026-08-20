@@ -55,11 +55,13 @@ interface AppearancePanelProps {
   onUploadSoundPack?: (file: File) => Promise<void>;
   onDeleteSoundPack?: (id: string) => void;
   profileStatus?: string;
+  displayName?: string;
+  onDisplayNameChange?: (name: string) => void;
   onPullProfile?: () => Promise<void>;
   onPushProfile?: () => Promise<void>;
 }
 
-export default function AppearancePanel({ settings, onChange, onClose, soundPacks = [], selectedSoundPackId = "", onSelectSoundPack, onUploadSoundPack, onDeleteSoundPack, profileStatus = "Local profile", onPullProfile, onPushProfile }: AppearancePanelProps) {
+export default function AppearancePanel({ settings, onChange, onClose, soundPacks = [], selectedSoundPackId = "", onSelectSoundPack, onUploadSoundPack, onDeleteSoundPack, profileStatus = "Local profile", displayName = "Lambert", onDisplayNameChange, onPullProfile, onPushProfile }: AppearancePanelProps) {
   const [draft, setDraft] = useState(settings);
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => { setDraft(settings); }, [settings]);
@@ -84,6 +86,7 @@ export default function AppearancePanel({ settings, onChange, onClose, soundPack
         <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Sound effects</legend><button type="button" className={`appearance-sound-toggle ${draft.soundEnabled ? "is-active" : ""}`} onClick={() => update({ ...draft, soundEnabled: !draft.soundEnabled }, false)} aria-pressed={draft.soundEnabled}><span aria-hidden="true">{draft.soundEnabled ? "◉" : "○"}</span><span>{draft.soundEnabled ? "Signal sounds on" : "Signal sounds off"}</span></button><p className="appearance-panel__hint">Optional UI chirps. Sound stays local unless you sync a selected pack.</p></fieldset>
         <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Sound pack</legend><div className="appearance-sound-packs">{soundPacks.length === 0 && <span className="appearance-panel__hint">No custom pack uploaded.</span>}{soundPacks.map((pack) => <div key={pack.id} className={`appearance-sound-pack ${selectedSoundPackId === pack.id ? "is-active" : ""}`}><button type="button" onClick={() => { onSelectSoundPack?.(pack.id); preview(pack); }} aria-pressed={selectedSoundPackId === pack.id}><span>◖</span><strong>{pack.name}</strong></button><button type="button" className="appearance-sound-pack__delete" onClick={() => onDeleteSoundPack?.(pack.id)} aria-label={`Delete sound pack ${pack.name}`}>×</button></div>)}<input ref={fileRef} type="file" accept="audio/wav,audio/mpeg,audio/ogg,audio/webm" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void onUploadSoundPack?.(file); event.currentTarget.value = ""; }} /><button type="button" className="appearance-upload" onClick={() => fileRef.current?.click()} disabled={soundPacks.length >= 3}>+ Upload sound pack <span>(max 3, 256KB each)</span></button></div></fieldset>
         <fieldset className="appearance-panel__section"><legend className="appearance-panel__label">Workspace density</legend><div className="appearance-segmented" role="group" aria-label="Workspace density">{(["comfortable", "compact"] as Density[]).map((value) => <button key={value} type="button" className={draft.density === value ? "is-active" : ""} onClick={() => update({ ...draft, density: value })} aria-pressed={draft.density === value}>{value}</button>)}</div></fieldset>
+        <fieldset className="appearance-panel__section appearance-personal-profile"><legend className="appearance-panel__label">Personal coding profile</legend><label className="appearance-profile-name"><span>Agent recognizes</span><input value={displayName ?? "Lambert"} onChange={(event) => onDisplayNameChange?.(event.target.value)} placeholder="Your name" maxLength={60} /></label><p className="appearance-panel__hint">Used to personalize ORA’s private system context.</p></fieldset>
         <fieldset className="appearance-panel__section appearance-profile-sync"><legend className="appearance-panel__label">Personal profile sync</legend><div className="appearance-profile-sync__row"><span className="appearance-panel__hint" role="status">{profileStatus}</span><button type="button" onClick={() => void onPullProfile?.()}>Pull</button><button type="button" onClick={() => void onPushProfile?.()}>Push</button></div><p className="appearance-panel__hint">Private GitHub Gist sync. Your profile is not written to this repository.</p></fieldset>
       </div>
     </section>

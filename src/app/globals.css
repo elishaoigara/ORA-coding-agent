@@ -1375,3 +1375,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled { cursor: no
 .system-prompt-transfer-button { flex: 1; min-height: 29px; padding: 6px 8px; border: 1px solid rgba(155, 140, 255, .24); border-radius: 7px; color: #b9aaff; background: rgba(155, 140, 255, .06); font: 600 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .system-prompt-transfer-button:hover:not(:disabled) { border-color: rgba(155, 140, 255, .68); background: rgba(155, 140, 255, .13); }
 .system-prompt-transfer-button:disabled { cursor: not-allowed; opacity: .35; }
+
+.appearance-profile-name { display: grid; gap: 7px; color: var(--ora-dim); font: 600 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.appearance-profile-name input { width: 100%; min-height: 34px; padding: 7px 9px; border: 1px solid var(--ora-line); border-radius: 8px; outline: 0; color: var(--ora-text); background: rgba(6, 9, 16, .62); font: 500 12px/1.2 ui-sans-serif, system-ui, sans-serif; text-transform: none; letter-spacing: normal; }
+.appearance-profile-name input:focus { border-color: var(--ora-cyan); box-shadow: 0 0 0 3px rgba(72, 230, 209, .1); }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { memo, useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -419,7 +419,7 @@ function InlineCode({ children }: { children: React.ReactNode }) {
 }
 
 // ── Main ChatMessage ──────────────────────────────────────────────────────────
-export default function ChatMessage({
+function ChatMessage({
   message,
   activeRepo,
   onSaveSnippet,
@@ -562,3 +562,5 @@ export default function ChatMessage({
     </div>
   );
 }
+
+export default memo(ChatMessage);

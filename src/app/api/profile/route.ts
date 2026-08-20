@@ -8,7 +8,7 @@ const PROFILE_FILE = "ora-profile.json";
 const MAX_TOTAL_BYTES = 900_000;
 
 type SoundPack = ProfileSyncRequest["soundPacks"][number];
-type ProfilePayload = { updatedAt: number; appearance: ProfileSyncRequest["appearance"]; soundPacks: Array<Omit<SoundPack, "dataUrl"> & { file: string }>; customPromptTemplates?: ProfileSyncRequest["customPromptTemplates"]; promptVariables?: ProfileSyncRequest["promptVariables"] };
+type ProfilePayload = { updatedAt: number; appearance: ProfileSyncRequest["appearance"]; soundPacks: Array<Omit<SoundPack, "dataUrl"> & { file: string }>; customPromptTemplates?: ProfileSyncRequest["customPromptTemplates"]; promptVariables?: ProfileSyncRequest["promptVariables"]; personalProfile?: ProfileSyncRequest["personalProfile"] };
 type GistFile = { content?: string };
 type Gist = { id: string; files: Record<string, GistFile> };
 
@@ -53,6 +53,7 @@ function hydrateProfile(profile: ProfilePayload | null, gist: Gist | null) {
     }),
     customPromptTemplates: profile.customPromptTemplates ?? [],
     promptVariables: profile.promptVariables ?? {},
+    personalProfile: profile.personalProfile ?? { displayName: "Lambert" },
   };
 }
 
@@ -63,7 +64,7 @@ function profileFiles(payload: ProfileSyncRequest, updatedAt: number) {
     files[safeFile] = { content: pack.dataUrl };
     return { id: pack.id, name: pack.name, mime: pack.mime, file: safeFile };
   });
-  const profile: ProfilePayload = { updatedAt, appearance: payload.appearance, soundPacks: packs, customPromptTemplates: payload.customPromptTemplates, promptVariables: payload.promptVariables };
+  const profile: ProfilePayload = { updatedAt, appearance: payload.appearance, soundPacks: packs, customPromptTemplates: payload.customPromptTemplates, promptVariables: payload.promptVariables, personalProfile: payload.personalProfile };
   files[PROFILE_FILE] = { content: JSON.stringify(profile, null, 2) };
   return files;
 }

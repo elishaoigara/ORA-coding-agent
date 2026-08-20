@@ -185,6 +185,10 @@ const profileSoundPackSchema = z.object({
   dataUrl: z.string().regex(/^data:audio\/(wav|mpeg|ogg|webm);base64,[A-Za-z0-9+/=]+$/).max(360_000),
 });
 
+const personalProfileSchema = z.object({
+  displayName: z.string().trim().min(1).max(60),
+});
+
 const profilePromptTemplateSchema = z.object({
   id: z.string().trim().min(1).max(100).regex(/^[a-z0-9_-]+$/i),
   label: z.string().trim().min(1).max(80),
@@ -202,6 +206,7 @@ export const profileSyncSchema = z.object({
   soundPacks: z.array(profileSoundPackSchema).max(3),
   customPromptTemplates: z.array(profilePromptTemplateSchema).max(20),
   promptVariables: z.record(z.string().trim().min(1).max(40).regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/), z.string().max(200)).refine((values) => Object.keys(values).length <= 20, "Too many prompt variables"),
+  personalProfile: personalProfileSchema,
 });
 export type ProfileSyncRequest = z.infer<typeof profileSyncSchema>;
 

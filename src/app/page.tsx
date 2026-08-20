@@ -186,6 +186,7 @@ function Workspace() {
   const [promptVariables, setPromptVariables] = useState<Record<string, string>>(() => {
     try { return JSON.parse(lsGet("ora:prompt-variables", "{}")) as Record<string, string>; } catch { return {}; }
   });
+  const [personalDisplayName, setPersonalDisplayName] = useState(() => lsGet("ora:display-name", "Lambert") || "Lambert");
   const promptImportRef = useRef<HTMLInputElement>(null);
   const [branchFirst, setBranchFirst]     = useState(false);
     const [agentBranch, setAgentBranch] = useState(""); // UI improvement #7
@@ -324,10 +325,10 @@ function Workspace() {
     try {
       const query = profileGistId ? `?gistId=${encodeURIComponent(profileGistId)}` : "";
       const response = await fetch(`/api/profile${query}`);
-      const data = await response.json() as { error?: string; gistId?: string | null; profile?: { appearance: AppearanceSettings; soundPacks: SoundPack[]; customPromptTemplates?: PromptTemplate[]; promptVariables?: Record<string, string> } | null };
+      const data = await response.json() as { error?: string; gistId?: string | null; profile?: { appearance: AppearanceSettings; soundPacks: SoundPack[]; customPromptTemplates?: PromptTemplate[]; promptVariables?: Record<string, string>; personalProfile?: { displayName: string } } | null };
       if (!response.ok || data.error) throw new Error(data.error || "Profile pull failed");
       if (data.gistId) { setProfileGistId(data.gistId); lsSet("ora:profile-gist", data.gistId); }
-      if (data.profile) { setAppearance(data.profile.appearance); persistSoundPacks(data.profile.soundPacks); persistCustomPromptTemplates(data.profile.customPromptTemplates ?? []); setPromptVariables(data.profile.promptVariables ?? {}); lsSet("ora:prompt-variables", JSON.stringify(data.profile.promptVariables ?? {})); const selected = data.profile.soundPacks[0]?.id ?? ""; setSelectedSoundPackId(selected); lsSet("ora:selected-sound-pack", selected); }
+      if (data.profile) { setAppearance(data.profile.appearance); persistSoundPacks(data.profile.soundPacks); persistCustomPromptTemplates(data.profile.customPromptTemplates ?? []); setPromptVariables(data.profile.promptVariables ?? {}); lsSet("ora:prompt-variables", JSON.stringify(data.profile.promptVariables ?? {})); const nextName = data.profile.personalProfile?.displayName || "Lambert"; setPersonalDisplayName(nextName); lsSet("ora:display-name", nextName); const selected = data.profile.soundPacks[0]?.id ?? ""; setSelectedSoundPackId(selected); lsSet("ora:selected-sound-pack", selected); }
       setProfileStatus(data.profile ? "Synced from private Gist" : "No remote profile yet");
     } catch (error) { setProfileStatus(error instanceof Error ? error.message : "Profile pull failed"); }
   }, [persistCustomPromptTemplates, persistSoundPacks, profileGistId]);
@@ -335,15 +336,16 @@ function Workspace() {
   const pushPersonalProfile = useCallback(async () => {
     setProfileStatus("Pushing private profile…");
     try {
-      const response = await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gistId: profileGistId || undefined, appearance, soundPacks, customPromptTemplates, promptVariables }) });
+      const response = await fetch("/api/profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gistId: profileGistId || undefined, appearance, soundPacks, customPromptTemplates, promptVariables, personalProfile: { displayName: personalDisplayName.trim() || "Lambert" } }) });
       const data = await response.json() as { error?: string; gistId?: string | null };
       if (!response.ok || data.error) throw new Error(data.error || "Profile push failed");
       if (data.gistId) { setProfileGistId(data.gistId); lsSet("ora:profile-gist", data.gistId); }
       setProfileStatus("Synced to private Gist");
     } catch (error) { setProfileStatus(error instanceof Error ? error.message : "Profile push failed"); }
-  }, [appearance, customPromptTemplates, profileGistId, promptVariables, soundPacks]);
+  }, [appearance, customPromptTemplates, personalDisplayName, profileGistId, promptVariables, soundPacks]);
 
   useEffect(() => { lsSet("ora:selected-sound-pack", selectedSoundPackId); }, [selectedSoundPackId]);
+  useEffect(() => { lsSet("ora:display-name", personalDisplayName.trim() || "Lambert"); }, [personalDisplayName]);
 
   useKeyboardShortcuts({
     onSend:          () => !loading && sendMessage(),
@@ -401,7 +403,7 @@ function Workspace() {
   const activeProvider = providers.find((p) => p.id === selectedProviderId);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current?.scrollIntoView({ behavior: loading ? "auto" : "smooth", block: "nearest" });
   }, [messages, loading, stagedFiles, currentPlan]);
 
   const handleFilesChange = useCallback((files: InjectedFile[], repo: string) => {
@@ -424,13 +426,15 @@ function Workspace() {
     setLoading(true);
     const assistantIndex = newMessages.length;
     const resolvedSystemPrompt = resolvePromptVariables(systemPrompt.trim(), promptVariables);
-    const messagesWithSystem: Message[] = resolvedSystemPrompt
-      ? [{ role: "system", content: resolvedSystemPrompt }, ...newMessages]
-      : newMessages;
+    const userName = personalDisplayName.trim() || "Lambert";
+    const personalContext = `You are assisting ${userName}, the owner of this private coding workspace. Address them by name sparingly and keep their preferences in mind.`;
+    const systemContent = [personalContext, resolvedSystemPrompt].filter(Boolean).join("\n\n");
+    const messagesWithSystem: Message[] = [{ role: "system", content: systemContent }, ...newMessages];
     const contextFiles = Array.from(
       new Map([...injectedFiles, ...localFiles].map((file) => [file.path, file])).values()
     );
     let fullText = "";
+    let lastStreamPaint = 0;
     let capturedUsage: TokenUsage | null = null;
 
     try {
@@ -487,10 +491,15 @@ function Workspace() {
         const delta = payload.choices?.[0]?.delta?.content ?? "";
         if (!delta) return;
         fullText += delta;
-        setMessages((current) => [
-          ...current.slice(0, -1),
-          { role: "assistant", content: fullText, createdAt: now },
-        ]);
+        const currentTime = performance.now();
+        if (currentTime - lastStreamPaint >= 32) {
+          lastStreamPaint = currentTime;
+          const visibleText = fullText;
+          setMessages((current) => [
+            ...current.slice(0, -1),
+            { role: "assistant", content: visibleText, createdAt: now },
+          ]);
+        }
       });
 
       if (!fullText.trim()) throw new Error("The provider returned an empty response");
@@ -652,7 +661,7 @@ function Workspace() {
       headers: { "Content-Type": "application/json" },
       signal: abortRef.current?.signal,
       body: JSON.stringify({
-        task: `${params.task}${memoryPromptContext(projectMemory)}${collaborationBrief(specialists)}`,
+        task: `The workspace owner is ${personalDisplayName.trim() || "Lambert"}. Address them by name sparingly and personalize recommendations when relevant.\n\n${params.task}${memoryPromptContext(projectMemory)}${collaborationBrief(specialists)}`,
         repo: activeRepo,
         phase: params.phase,
         plan: params.plan,
@@ -1371,6 +1380,8 @@ function Workspace() {
               onUploadSoundPack={handleUploadSoundPack}
               onDeleteSoundPack={(id) => { const next = soundPacks.filter((pack) => pack.id !== id); persistSoundPacks(next); if (selectedSoundPackId === id) setSelectedSoundPackId(""); }}
               profileStatus={profileStatus}
+              displayName={personalDisplayName}
+              onDisplayNameChange={setPersonalDisplayName}
               onPullProfile={pullPersonalProfile}
               onPushProfile={pushPersonalProfile}
             />
