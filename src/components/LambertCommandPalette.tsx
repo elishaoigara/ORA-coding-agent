@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { optimizeWorkflowBrief } from "@/lib/workflowOptimizer";
 
 export interface LambertWorkflow {
   id: string;
@@ -28,6 +29,7 @@ interface Props {
 export default function LambertCommandPalette({ open, busy, onClose, onRun }: Props) {
   const [query, setQuery] = useState("");
   const [customTask, setCustomTask] = useState("");
+  const [autoOptimize, setAutoOptimize] = useState(true);
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return normalized ? LAMBERT_WORKFLOWS.filter((item) => `${item.label} ${item.description}`.toLowerCase().includes(normalized)) : LAMBERT_WORKFLOWS;
@@ -43,6 +45,8 @@ export default function LambertCommandPalette({ open, busy, onClose, onRun }: Pr
   }, [open, onClose]);
 
   if (!open) return null;
+  const refinedCustomTask = autoOptimize ? optimizeWorkflowBrief(customTask) : customTask.trim();
+  const runCustomTask = () => { if (refinedCustomTask) onRun(refinedCustomTask); };
 
   return (
     <div className="ora-command-overlay" role="presentation" onMouseDown={onClose}>
@@ -66,7 +70,7 @@ export default function LambertCommandPalette({ open, busy, onClose, onRun }: Pr
           ))}
           {filtered.length === 0 && <p className="ora-command-palette__empty">No preset matches that filter.</p>}
         </div>
-        <div className="ora-command-palette__custom"><label htmlFor="lambert-custom-workflow">Custom autonomous brief</label><div><input id="lambert-custom-workflow" value={customTask} onChange={(event) => setCustomTask(event.target.value)} placeholder="e.g. Harden the checkout flow and add regression tests" onKeyDown={(event) => { if (event.key === "Enter" && customTask.trim()) onRun(customTask.trim()); }} /><button type="button" onClick={() => customTask.trim() && onRun(customTask.trim())} disabled={busy || !customTask.trim()}>Run</button></div></div>
+        <div className="ora-command-palette__custom"><label htmlFor="lambert-custom-workflow">Custom autonomous brief</label><div><input id="lambert-custom-workflow" value={customTask} onChange={(event) => setCustomTask(event.target.value)} placeholder="e.g. Harden the checkout flow and add regression tests" onKeyDown={(event) => { if (event.key === "Enter") runCustomTask(); }} /><button type="button" onClick={runCustomTask} disabled={busy || !refinedCustomTask}>Run</button></div><label className="ora-command-palette__optimize"><input type="checkbox" checked={autoOptimize} onChange={(event) => setAutoOptimize(event.target.checked)} /><span>Auto-refine brief before execution</span></label>{autoOptimize && customTask.trim() && <small className="ora-command-palette__refined">Adds evidence-first inspection, safe change boundaries, verification, and risk summary.</small>}</div>
         <footer className="ora-command-palette__footer"><span><kbd>Ctrl</kbd><kbd>P</kbd> open palette</span><span><kbd>Esc</kbd> close</span><span>Runs in Agent mode</span></footer>
       </section>
     </div>

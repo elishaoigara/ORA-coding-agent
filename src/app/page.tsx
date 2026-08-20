@@ -24,6 +24,7 @@ import { resolveModel, type ProviderId } from "@/lib/providers";
 import { SYSTEM_PROMPT_TEMPLATES, type PromptTemplate } from "@/lib/promptTemplates";
 import { estimatePromptTokens } from "@/lib/promptTokens";
 import { extractPromptVariables, resolvePromptVariables } from "@/lib/promptVariables";
+import { benchmarkCsv, benchmarkJson } from "@/lib/workflowOptimizer";
 import type { Message, InjectedFile, PublicProvider, GitHubContext } from "@/types";
 import type { StagedFile } from "@/lib/agentTools";
 import type { AgentPlan } from "@/lib/agent/types";
@@ -97,6 +98,14 @@ function lsGet(key: string, fallback: string): string {
 function lsSet(key: string, value: string) {
   if (typeof window === "undefined") return;
   try { localStorage.setItem(key, value); } catch { /* quota */ }
+}
+function downloadTextFile(filename: string, content: string, mime: string) {
+  if (typeof window === "undefined") return;
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url; anchor.download = filename; anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 500);
 }
 
 // Icons
@@ -218,6 +227,16 @@ function Workspace() {
     });
   }, []);
   const clearBenchmarks = useCallback(() => { setBenchmarkSamples([]); lsSet("ora:benchmark-samples", "[]"); }, []);
+  const exportBenchmarkJson = useCallback(() => downloadTextFile(`ora-benchmark-${new Date().toISOString().slice(0, 10)}.json`, benchmarkJson(benchmarkSamples), "application/json"), [benchmarkSamples]);
+  const exportBenchmarkCsv = useCallback(() => downloadTextFile(`ora-benchmark-${new Date().toISOString().slice(0, 10)}.csv`, benchmarkCsv(benchmarkSamples), "text/csv;charset=utf-8"), [benchmarkSamples]);
+  const shareBenchmarkReport = useCallback(async () => {
+    const json = benchmarkJson(benchmarkSamples);
+    const file = typeof File !== "undefined" ? new File([json], "ora-benchmark-report.json", { type: "application/json" }) : null;
+    if (navigator.share && file && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+      try { await navigator.share({ title: "ORA benchmark report", text: "Lambert’s ORA performance telemetry", files: [file] }); return; } catch { return; }
+    }
+    try { await navigator.clipboard.writeText(json); } catch { downloadTextFile("ora-benchmark-report.json", json, "application/json"); }
+  }, [benchmarkSamples]);
   const abortRef = useRef<AbortController | null>(null);
 
   // Track software keyboard height via visualViewport
@@ -1636,7 +1655,7 @@ function Workspace() {
       </div>
 
       <LambertCommandPalette open={showCommandPalette} busy={isAgentBusy || loading} onClose={() => setShowCommandPalette(false)} onRun={(prompt) => { setShowCommandPalette(false); setAgentMode(true); void startPlanning(prompt); }} />
-      <BenchmarkDashboard open={showBenchmarks} samples={benchmarkSamples} live={loading || isAgentBusy} onClose={() => setShowBenchmarks(false)} onClear={clearBenchmarks} />
+      <BenchmarkDashboard open={showBenchmarks} samples={benchmarkSamples} live={loading || isAgentBusy} onClose={() => setShowBenchmarks(false)} onClear={clearBenchmarks} onExportJson={exportBenchmarkJson} onExportCsv={exportBenchmarkCsv} onShare={() => void shareBenchmarkReport()} />
       <ShortcutHelpModal open={showHelp} onClose={() => setShowHelp(false)} />
     </div>
     </ErrorBoundary>
